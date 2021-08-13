@@ -1,0 +1,27 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RTChat.Server.API", "src\RTChat.Server.API\RTChat.Server.API.csproj", "{D927EA0C-9E96-469C-8F41-77D95C77B362}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{07AD1348-8227-4133-B693-1685F4EA86CC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RTChat.Server.API.Tests", "tests\RTChat.Server.API.Tests\RTChat.Server.API.Tests.csproj", "{2B25C151-E7E5-4D43-8811-96F221E9491C}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D927EA0C-9E96-469C-8F41-77D95C77B362}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D927EA0C-9E96-469C-8F41-77D95C77B362}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D927EA0C-9E96-469C-8F41-77D95C77B362}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D927EA0C-9E96-469C-8F41-77D95C77B362}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2B25C151-E7E5-4D43-8811-96F221E9491C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2B25C151-E7E5-4D43-8811-96F221E9491C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2B25C151-E7E5-4D43-8811-96F221E9491C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2B25C151-E7E5-4D43-8811-96F221E9491C}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{2B25C151-E7E5-4D43-8811-96F221E9491C} = {07AD1348-8227-4133-B693-1685F4EA86CC}
+	EndGlobalSection
+EndGlobal
