@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.SignalR;
@@ -9,6 +10,7 @@ using Xunit;
 
 namespace RTChat.Server.API.Tests.Providers
 {
+    [ExcludeFromCodeCoverage]
     public class UserIdProviderTests
     {
         private readonly UserIdProvider _sut;

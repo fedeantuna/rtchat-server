@@ -1,5 +1,8 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Net.Mime;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
@@ -49,7 +52,8 @@ namespace RTChat.Server.API
                 });
             });
 
-            services.AddHttpClient<ManagementService>();
+            services.AddHttpClient<UserService>(ConfigureAuth0ManagementApiClient);
+            services.AddHttpClient<TokenService>(ConfigureAuth0ManagementApiClient);
 
             services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 .AddJwtBearer(options =>
@@ -89,6 +93,13 @@ namespace RTChat.Server.API
             {
                 endpoints.MapHub<ChatHub>(ChatHubEndpoint);
             });
+        }
+
+        private void ConfigureAuth0ManagementApiClient(HttpClient httpClient)
+        {
+            var baseAddress = this._configuration[ConfigurationKeys.Auth0ManagementApiBaseAddress];
+            httpClient.BaseAddress = new Uri(baseAddress);
+            httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json));
         }
     }
 }
