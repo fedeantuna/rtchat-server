@@ -142,6 +142,33 @@ namespace RTChat.Server.API.Tests.Services
             Assert.Equal(user.Email, result.Email);
             Assert.Equal(user.Picture, result.Picture);
         }
+        
+        [Fact]
+        public async Task GetUser_ReturnsNull_WhenUsersByEmailIsEmpty()
+        {
+            // Arrange
+            const String fields = "user_id,email,picture";
+
+            const String email = "obiwankenobi@jediorder.rep";
+            var mailAddress = new MailAddress(email);
+            var tokenResponse = new TokenResponse
+            {
+                Scope = "test-scope",
+                AccessToken = "test-access-token",
+                ExpiresIn = 42,
+                TokenType = "test-token-type"
+            };
+            var userByEmailEndpoint =
+                $"{Auth0ManagementApiBaseAddress}{Auth0ManagementApiUsersByEmailEndpoint}?fields={fields}&include_fields=true&email={email}";
+
+            this.SetUpHttpMessageHandlerWithListOfUserResponse(userByEmailEndpoint, tokenResponse, Array.Empty<User>());
+
+            // Act
+            var result = await this._sut.GetUser(mailAddress, tokenResponse);
+
+            // Assert
+            Assert.Null(result);
+        }
 
         [Fact]
         public async Task GetUser_ThrowsHttpRequestException_WhenResponseByEmailIsNotOk()
