@@ -1,4 +1,4 @@
-name: .NET
+name: Build and Test
 
 on:
   pull_request:
@@ -21,9 +21,9 @@ jobs:
       run: dotnet build --no-restore
     - name: Test
       run: dotnet test --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory:"./.coverage/" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format="lcov"
-    - name: Recover test coverage report
+    - name: Recover Test Coverage Report
       run: mkdir ./CoverageReport && cp ./.coverage/**/coverage.info ./CoverageReport
-    - name: Publish coverage to coveralls.io
+    - name: Publish Coverage to coveralls.io
       uses: coverallsapp/github-action@master
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
