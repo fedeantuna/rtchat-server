@@ -1,0 +1,1 @@
+[![Coverage Status](https://coveralls.io/repos/github/fedeantuna/rtchat-server/badge.svg?branch=main)](https://coveralls.io/github/fedeantuna/rtchat-server?branch=main)
