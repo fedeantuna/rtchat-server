@@ -20,9 +20,10 @@ jobs:
     - name: Build
       run: dotnet build --no-restore
     - name: Test
-      run: dotnet test --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory:"./coverage/" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format="lcov"
+      run: echo '::set-output name=COVERAGE::$(dotnet test --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory:"./coverage/" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format="lcov" | awk "/Attachments/{getline; print}" | sed "s/^ *//g")'
+      id: dotnet-test-coverage
     - name: Publish coverage to coveralls.io
       uses: coverallsapp/github-action@master
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        path-to-lcov: './coverage/**/coverage.info'
+        path-to-lcov: ${{ steps.dotnet-test-coverage.outputs.COVERAGE }}
