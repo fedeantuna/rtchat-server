@@ -5,18 +5,12 @@ using RTChat.Server.API.Constants;
 
 namespace RTChat.Server.API.Models
 {
-    public class User
+    public class UserStatus
     {
         [JsonPropertyName(OpenIdConnectParameterNames.UserId)]
-        public String Id { get; init; }
-
-        [JsonPropertyName(OpenIdConnectScope.Email)]
-        public String Email { get; init; }
-
-        [JsonPropertyName((AuthParameterNames.Picture))]
-        public String Picture { get; init; }
+        public String UserId { get; init; }
         
         [JsonPropertyName(AuthParameterNames.Status)]
-        public String Status { get; set; }
+        public String Status { get; init; }
     }
 }

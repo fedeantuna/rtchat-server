@@ -14,5 +14,6 @@ namespace RTChat.Server.API.Constants
         public const String Auth0ManagementApiClientSecret = "Auth0ManagementAPI:ClientSecret";
         public const String Auth0ManagementApiUsersByIdEndpoint = "Auth0ManagementAPI:UsersByIdEndpoint";
         public const String Auth0ManagementApiUsersByEmailEndpoint = "Auth0ManagementAPI:UsersByEmailEndpoint";
+        public const String InMemoryCacheSizeLimit = "InMemoryCache:SizeLimit";
     }
 }

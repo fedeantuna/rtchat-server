@@ -1,6 +1,5 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Mime;
 using System.Security.Claims;
@@ -12,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
+using RTChat.Server.API.Cache;
 using RTChat.Server.API.Constants;
 using RTChat.Server.API.Hubs;
 using RTChat.Server.API.Middleware;
@@ -25,14 +25,14 @@ namespace RTChat.Server.API
     {
         private const String CorsClientPolicyName = "client";
         private const String ChatHubEndpoint = "/hub/chat";
-        
+
         private readonly IConfiguration _configuration;
 
         public Startup(IConfiguration configuration)
         {
             _configuration = configuration;
         }
-        
+
         // This method gets called by the runtime. Use this method to add services to the container.
         // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
         public void ConfigureServices(IServiceCollection services)
@@ -43,8 +43,9 @@ namespace RTChat.Server.API
             {
                 options.AddPolicy(CorsClientPolicyName, policy =>
                 {
-                    var allowedOrigins = this._configuration.GetSection(ConfigurationKeys.CorsAllowedOrigins).Get<String[]>();
-                    
+                    var allowedOrigins = this._configuration.GetSection(ConfigurationKeys.CorsAllowedOrigins)
+                        .Get<String[]>();
+
                     policy.AllowAnyHeader()
                         .AllowAnyMethod()
                         .WithOrigins(allowedOrigins)
@@ -52,8 +53,13 @@ namespace RTChat.Server.API
                 });
             });
 
-            services.AddHttpClient<UserService>(ConfigureAuth0ManagementApiClient);
-            services.AddHttpClient<TokenService>(ConfigureAuth0ManagementApiClient);
+            services.AddHttpClient(HttpClientNames.Auth0ManagementApi, c =>
+            {
+                var baseAddress = this._configuration[ConfigurationKeys.Auth0ManagementApiBaseAddress];
+                c.BaseAddress = new Uri(baseAddress);
+                c.DefaultRequestHeaders.Accept.Add(
+                    new MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json));
+            });
 
             services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 .AddJwtBearer(options =>
@@ -66,8 +72,13 @@ namespace RTChat.Server.API
                         NameClaimType = ClaimTypes.NameIdentifier
                     };
                 });
-            
+
             services.AddSingleton<IUserIdProvider, UserIdProvider>();
+
+            services.AddScoped<IUserService, UserService>();
+            services.AddScoped<ITokenService, TokenService>();
+
+            services.AddSingleton<IApplicationCache, ApplicationCache>();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -81,7 +92,7 @@ namespace RTChat.Server.API
             app.UseHttpsRedirection();
 
             app.UseRouting();
-            
+
             app.UseSignalRAuth();
 
             app.UseCors(CorsClientPolicyName);
@@ -89,17 +100,7 @@ namespace RTChat.Server.API
             app.UseAuthentication();
             app.UseAuthorization();
 
-            app.UseEndpoints(endpoints =>
-            {
-                endpoints.MapHub<ChatHub>(ChatHubEndpoint);
-            });
-        }
-
-        private void ConfigureAuth0ManagementApiClient(HttpClient httpClient)
-        {
-            var baseAddress = this._configuration[ConfigurationKeys.Auth0ManagementApiBaseAddress];
-            httpClient.BaseAddress = new Uri(baseAddress);
-            httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json));
+            app.UseEndpoints(endpoints => { endpoints.MapHub<ChatHub>(ChatHubEndpoint); });
         }
     }
 }

@@ -11,14 +11,14 @@ using RTChat.Server.API.Models;
 
 namespace RTChat.Server.API.Services
 {
-    public class TokenService
+    public class TokenService : ITokenService
     {
         private readonly HttpClient _httpClient;
         private readonly IConfiguration _configuration;
 
-        public TokenService(HttpClient httpClient, IConfiguration configuration)
+        public TokenService(IHttpClientFactory httpClientFactory, IConfiguration configuration)
         {
-            this._httpClient = httpClient;
+            this._httpClient = httpClientFactory.CreateClient(HttpClientNames.Auth0ManagementApi);
             this._configuration = configuration;
         }
 

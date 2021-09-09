@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Mail;
@@ -13,35 +14,39 @@ using RTChat.Server.API.Models;
 
 namespace RTChat.Server.API.Services
 {
-    public class UserService
+    public class UserService : IUserService
     {
         private readonly HttpClient _httpClient;
         private readonly IConfiguration _configuration;
 
-        public UserService(HttpClient httpClient, IConfiguration configuration)
+        public UserService(IHttpClientFactory httpClientFactory, IConfiguration configuration)
         {
-            _httpClient = httpClient;
+            _httpClient = httpClientFactory.CreateClient(HttpClientNames.Auth0ManagementApi);
             _configuration = configuration;
         }
         
         public async Task<User> GetUser(String id, TokenResponse tokenResponse)
         {
-            var user = await this.GetUser(
+            var serializedUser = await this.GetSerializedUser(
                 () => this.GetUserByIdEndpoint(id),
                 tokenResponse.TokenType,
                 tokenResponse.AccessToken);
 
+            var user = JsonSerializer.Deserialize<User>(serializedUser);
+            
             return user;
         }
         
         public async Task<User> GetUser(MailAddress mailAddress, TokenResponse tokenResponse)
         {
-            var user = await this.GetUser(
+            var serializedUser = await this.GetSerializedUser(
                 () => this.GetUserByEmailEndpoint(mailAddress.Address),
                 tokenResponse.TokenType,
                 tokenResponse.AccessToken);
+            
+            var user = JsonSerializer.Deserialize<IEnumerable<User>>(serializedUser);
 
-            return user;
+            return user?.FirstOrDefault();
         }
 
         private String GetUserByIdEndpoint(String id)
@@ -67,7 +72,7 @@ namespace RTChat.Server.API.Services
             return endpoint;
         }
 
-        private async Task<User> GetUser(Func<String> getEndpoint, String tokenType, String accessToken)
+        private async Task<String> GetSerializedUser(Func<String> getEndpoint, String tokenType, String accessToken)
         {
             var endpoint = getEndpoint();
 
@@ -77,9 +82,7 @@ namespace RTChat.Server.API.Services
             response.EnsureSuccessStatusCode();
             var stringResponse = await response.Content.ReadAsStringAsync();
 
-            var user = JsonSerializer.Deserialize<User>(stringResponse);
-
-            return user ?? new User();
+            return stringResponse;
         }
 
         private static String[] GetUserFields()
@@ -94,11 +97,11 @@ namespace RTChat.Server.API.Services
             return fields;
         }
 
-        private static Dictionary<String, String?> GetUserParameters()
+        private static Dictionary<String, String> GetUserParameters()
         {
             var fields = GetUserFields();
 
-            var parameters = new Dictionary<String, String?>
+            var parameters = new Dictionary<String, String>
             {
                 { AuthParameterNames.Fields, String.Join(',', fields) },
                 { AuthParameterNames.IncludeFields, true.ToString().ToLowerInvariant() }
