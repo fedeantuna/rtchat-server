@@ -83,5 +83,5 @@ jobs:
         app-name: 'rtchat-server'
         app-settings-json: '${{ secrets.APP_SETTINGS }}'
       id: settings
-      - run: echo "The webapp-url is ${{ steps.settings.outputs.webapp-url }}"
-      - run: az logout
+    - run: echo "The webapp-url is ${{ steps.settings.outputs.webapp-url }}"
+    - run: az logout
