@@ -15,5 +15,4 @@ jobs:
       with:
         workflow: build-and-test.yml
         workflow_conclussion: success
-        branch: main
         name: rtchat-server-artifact
