@@ -30,3 +30,10 @@ jobs:
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         path-to-lcov: ./CoverageReport/coverage.info
+    - name: .NET Publish
+      run: dotnet publish --no-build -c Release -o ./bin
+    - name: Upload published app
+      uses: actions/upload-artifact@v2
+      with:
+        name: rtchat-server-artifact
+        path: ./bin/
