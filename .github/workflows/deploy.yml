@@ -1,0 +1,10 @@
+name: Deploy
+
+jobs:
+  - name: Download artifact
+    uses: dawidd6/action-download-artifact@v2
+    with:
+      workflow: build-and-test.yml
+      workflow_conclussion: success
+      branch: main
+      name: rtchat-server-artifact
