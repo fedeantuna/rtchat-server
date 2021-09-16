@@ -78,8 +78,6 @@ namespace RTChat.Server.API
             services.AddScoped<ITokenService, TokenService>();
 
             services.AddSingleton<IApplicationCache, ApplicationCache>();
-
-            services.AddControllers();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -101,11 +99,7 @@ namespace RTChat.Server.API
             app.UseAuthentication();
             app.UseAuthorization();
 
-            app.UseEndpoints(endpoints =>
-            {
-                endpoints.MapHub<ChatHub>(ChatHubEndpoint);
-                endpoints.MapDefaultControllerRoute();
-            });
+            app.UseEndpoints(endpoints => { endpoints.MapHub<ChatHub>(ChatHubEndpoint); });
         }
     }
 }
