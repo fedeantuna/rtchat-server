@@ -823,6 +823,69 @@ namespace RTChat.Server.API.Tests.Hubs
         }
         
         [Fact]
+        public async Task SendMessage_ThrowsEmptyMessageException_WhenMessageContentIsNull()
+        {
+            // Arrange
+            const String messageContent = null;
+            var receiverId = Guid.NewGuid().ToString();
+            var outgoingMessage = new OutgoingMessage
+            {
+                ReceiverId = receiverId,
+                Content = messageContent
+            };
+
+            this.SetUpNullUserIdentifier();
+
+            // Act
+            Task SendMessage() => this._sut.SendMessage(outgoingMessage);
+
+            // Assert
+            await Assert.ThrowsAsync<EmptyMessageException>(SendMessage);
+        }
+        
+        [Fact]
+        public async Task SendMessage_ThrowsEmptyMessageException_WhenMessageContentIsEmpty()
+        {
+            // Arrange
+            const String messageContent = "";
+            var receiverId = Guid.NewGuid().ToString();
+            var outgoingMessage = new OutgoingMessage
+            {
+                ReceiverId = receiverId,
+                Content = messageContent
+            };
+
+            this.SetUpNullUserIdentifier();
+
+            // Act
+            Task SendMessage() => this._sut.SendMessage(outgoingMessage);
+
+            // Assert
+            await Assert.ThrowsAsync<EmptyMessageException>(SendMessage);
+        }
+        
+        [Fact]
+        public async Task SendMessage_ThrowsEmptyMessageException_WhenMessageContentIsWhiteSpaces()
+        {
+            // Arrange
+            const String messageContent = "     ";
+            var receiverId = Guid.NewGuid().ToString();
+            var outgoingMessage = new OutgoingMessage
+            {
+                ReceiverId = receiverId,
+                Content = messageContent
+            };
+
+            this.SetUpNullUserIdentifier();
+
+            // Act
+            Task SendMessage() => this._sut.SendMessage(outgoingMessage);
+
+            // Assert
+            await Assert.ThrowsAsync<EmptyMessageException>(SendMessage);
+        }
+        
+        [Fact]
         public async Task SendMessage_ThrowsNullUserIdentifierException_WhenUserIdentifierIsNull()
         {
             // Arrange
