@@ -43,8 +43,7 @@ namespace RTChat.Server.API
             {
                 options.AddPolicy(CorsClientPolicyName, policy =>
                 {
-                    var allowedOrigins = this._configuration.GetSection(ConfigurationKeys.CorsAllowedOrigins)
-                        .Get<String[]>();
+                    var allowedOrigins = this._configuration[ConfigurationKeys.CorsAllowedOrigins].Split(',');
 
                     policy.AllowAnyHeader()
                         .AllowAnyMethod()
