@@ -70,6 +70,11 @@ namespace RTChat.Server.API.Hubs
 
         public async Task SendMessage(OutgoingMessage outgoingMessage)
         {
+            if (String.IsNullOrEmpty(outgoingMessage.Content) || String.IsNullOrWhiteSpace(outgoingMessage.Content))
+            {
+                throw new EmptyMessageException();
+            }
+            
             var senderId = this.Context.UserIdentifier;
             
             if (String.IsNullOrEmpty(senderId) || String.IsNullOrEmpty(outgoingMessage.ReceiverId))
