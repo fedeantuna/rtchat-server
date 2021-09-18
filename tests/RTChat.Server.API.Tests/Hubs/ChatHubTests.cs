@@ -491,6 +491,8 @@ namespace RTChat.Server.API.Tests.Hubs
                 ReceiverId = receiverId,
                 Content = messageContent
             };
+            
+            this.SetUpUserIdentifier();
 
             // Act
             Task SendMessage() => this._sut.SendMessage(outgoingMessage);
@@ -511,6 +513,8 @@ namespace RTChat.Server.API.Tests.Hubs
                 Content = messageContent
             };
 
+            this.SetUpUserIdentifier();
+
             // Act
             Task SendMessage() => this._sut.SendMessage(outgoingMessage);
 
@@ -529,6 +533,8 @@ namespace RTChat.Server.API.Tests.Hubs
                 ReceiverId = receiverId,
                 Content = messageContent
             };
+            
+            this.SetUpUserIdentifier();
 
             // Act
             Task SendMessage() => this._sut.SendMessage(outgoingMessage);
