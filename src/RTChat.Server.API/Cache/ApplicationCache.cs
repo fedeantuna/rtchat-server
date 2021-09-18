@@ -15,6 +15,6 @@ namespace RTChat.Server.API.Cache
             });
         }
         
-        public MemoryCache MemoryCache { get; }
+        public IMemoryCache MemoryCache { get; }
     }
 }

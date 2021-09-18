@@ -4,6 +4,6 @@ namespace RTChat.Server.API.Cache
 {
     public interface IApplicationCache
     {
-        MemoryCache MemoryCache { get; }
+        IMemoryCache MemoryCache { get; }
     }
 }

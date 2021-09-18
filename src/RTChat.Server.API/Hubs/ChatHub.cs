@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net.Mail;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -15,6 +16,8 @@ namespace RTChat.Server.API.Hubs
     [Authorize]
     public class ChatHub : Hub<IChatHub>
     {
+        private static readonly Object Lock = new();
+        
         private readonly IApplicationCache _applicationCache;
         private readonly ITokenService _tokenService;
         private readonly IUserService _userService;
@@ -28,13 +31,15 @@ namespace RTChat.Server.API.Hubs
 
         public async Task StartConversation(String email)
         {
+            var currentUserId = this.GetCurrentUserId();
+
             var user = await this.GetUserByEmail(email);
 
             if (user != null)
             {
                 user.Status ??= Status.Offline;
 
-                await this.Groups.AddToGroupAsync(this.Context.ConnectionId, user.Id);
+                this.SetListeningUsers(currentUserId, user.Id);
             }
 
             await this.Clients.Caller.StartConversation(user);
@@ -42,30 +47,42 @@ namespace RTChat.Server.API.Hubs
 
         public async Task UpdateUserStatus(String status)
         {
-            var userId = this.Context.UserIdentifier;
+            var currentUserId = this.GetCurrentUserId();
 
-            if (String.IsNullOrEmpty(userId))
-            {
-                throw new NullUserIdentifierException();
-            }
-
-            var user = await this.GetUserById(userId);
+            var user = await this.GetUserById(currentUserId);
 
             if (user == null)
             {
-                throw new NullUserException(userId);
+                throw new NullUserException(currentUserId);
             }
-            
+
             user.Status = status;
-            this.SaveUserInApplicationCache(user);
 
             var userStatus = new UserStatus
             {
                 Status = status,
-                UserId = userId
+                UserId = currentUserId
             };
 
-            await this.Clients.Group(userId).UpdateUserStatus(userStatus);
+            Boolean listeningUsersEntryExists;
+            List<String> listeningUsers;
+            
+            lock (Lock)
+            {
+                var listeningUsersCacheEntry = $"{ApplicationCacheKeys.ListeningUserPrefix}{currentUserId}";
+                listeningUsersEntryExists = this._applicationCache.MemoryCache.TryGetValue(listeningUsersCacheEntry, out listeningUsers);
+
+                var currentUserCacheEntry = $"{ApplicationCacheKeys.UserPrefix}{user.Email}";
+                this._applicationCache.MemoryCache.Set(currentUserCacheEntry, user,
+                    new MemoryCacheEntryOptions().SetSize(ApplicationCacheEntrySizes.User));
+            }
+            
+            if (listeningUsersEntryExists)
+            {
+                await this.Clients.Users(listeningUsers).UpdateUserStatus(userStatus);
+            }
+
+            await this.Clients.User(currentUserId).SyncCurrentUserStatus(userStatus.Status);
         }
 
         public async Task SendMessage(OutgoingMessage outgoingMessage)
@@ -75,22 +92,22 @@ namespace RTChat.Server.API.Hubs
                 throw new EmptyMessageException();
             }
             
-            var senderId = this.Context.UserIdentifier;
-            
-            if (String.IsNullOrEmpty(senderId) || String.IsNullOrEmpty(outgoingMessage.ReceiverId))
+            var currentUserId = this.GetCurrentUserId();
+
+            if (String.IsNullOrEmpty(outgoingMessage.ReceiverId))
             {
                 throw new NullUserIdentifierException();
             }
 
-            var sender = await this.GetUserById(senderId);
+            var sender = await this.GetUserById(currentUserId);
 
             if (sender == null)
             {
-                throw new NullUserException(senderId);
+                throw new NullUserException(currentUserId);
             }
-            
+
             var receiver = await this.GetUserById(outgoingMessage.ReceiverId);
-            
+
             if (receiver == null)
             {
                 throw new NullUserException(outgoingMessage.ReceiverId);
@@ -103,7 +120,7 @@ namespace RTChat.Server.API.Hubs
                 Content = outgoingMessage.Content
             };
 
-            if (senderId != receiver.Id)
+            if (currentUserId != receiver.Id)
             {
                 await this.Clients.User(receiver.Id).ReceiveMessage(message);
             }
@@ -113,12 +130,90 @@ namespace RTChat.Server.API.Hubs
 
         public override async Task OnConnectedAsync()
         {
-            await this.UpdateUserStatus(Status.Online);
+            var currentUserId = this.GetCurrentUserId();
+
+            Int32 activeConnectionsForUser;
+            
+            lock (Lock)
+            {
+                var entryCache = $"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{currentUserId}";
+                activeConnectionsForUser = this._applicationCache.MemoryCache.GetOrCreate(entryCache, entry =>
+                    {
+                        entry.SetSize(ApplicationCacheEntrySizes.ActiveConnectionsForUser);
+
+                        return 0;
+                    });
+                
+                this._applicationCache.MemoryCache.Set($"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{currentUserId}",
+                    ++activeConnectionsForUser,
+                    new MemoryCacheEntryOptions().SetSize(ApplicationCacheEntrySizes.ActiveConnectionsForUser));
+            }
+            
+            if (activeConnectionsForUser == 1)
+            {
+                await this.UpdateUserStatus(Status.Online);
+            }
         }
 
         public override async Task OnDisconnectedAsync(Exception exception)
         {
-            await this.UpdateUserStatus(Status.Offline);
+            var currentUserId = this.GetCurrentUserId();
+
+            Int32 activeConnectionsForUser;
+            
+            lock (Lock)
+            {
+                activeConnectionsForUser =
+                    this._applicationCache.MemoryCache.Get<Int32>($"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{currentUserId}");
+                this._applicationCache.MemoryCache.Set($"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{currentUserId}",
+                    --activeConnectionsForUser,
+                    new MemoryCacheEntryOptions().SetSize(ApplicationCacheEntrySizes.ActiveConnectionsForUser));
+            }
+            
+            if (activeConnectionsForUser == 0)
+            {
+                await this.UpdateUserStatus(Status.Offline);
+            }
+        }
+
+        private String GetCurrentUserId()
+        {
+            var currentUserId = this.Context.UserIdentifier;
+
+            if (String.IsNullOrEmpty(currentUserId))
+            {
+                throw new NullUserIdentifierException();
+            }
+
+            return currentUserId;
+        }
+
+        private void SetListeningUsers(String currentUserId, String receiverId)
+        {
+            List<String> listeningUsersOnReceiver;
+            List<String> listeningUsersOnCurrentUser;
+
+            lock (Lock)
+            {
+                var listeningUsersOnReceiverCacheEntry = $"{ApplicationCacheKeys.ListeningUserPrefix}{receiverId}";
+                listeningUsersOnReceiver = this._applicationCache.MemoryCache.GetOrCreate(listeningUsersOnReceiverCacheEntry, entry =>
+                {
+                    entry.SetSize(ApplicationCacheEntrySizes.ListeningUser);
+
+                    return new List<String>();
+                });
+                    
+                var listeningUsersOnCurrentUserCacheEntry = $"{ApplicationCacheKeys.ListeningUserPrefix}{currentUserId}";
+                listeningUsersOnCurrentUser = this._applicationCache.MemoryCache.GetOrCreate(listeningUsersOnCurrentUserCacheEntry, entry =>
+                {
+                    entry.SetSize(ApplicationCacheEntrySizes.ListeningUser);
+
+                    return new List<String>();
+                });
+            }
+
+            listeningUsersOnReceiver.Add(currentUserId);
+            listeningUsersOnCurrentUser.Add(receiverId);
         }
 
         private async Task<User> GetUserByEmail(String email)
@@ -128,87 +223,18 @@ namespace RTChat.Server.API.Hubs
                 throw new NullUserIdentifierException();
             }
 
-            if (this.TryGetUserFromCache(email, out var user))
-            {
-                return user;
-            }
-
-            var tokenResponse = await this.GetToken();
-            user = await this._userService.GetUser(mailAddress, tokenResponse);
-
-            this.SaveUserInApplicationCache(user);
+            var tokenResponse = await this._tokenService.GetToken();
+            var user = await this._userService.GetUser(mailAddress, tokenResponse);
 
             return user;
         }
 
         private async Task<User> GetUserById(String userId)
         {
-            if (this.TryGetUserFromCache(userId, out var user))
-            {
-                return user;
-            }
-
-            var tokenResponse = await this.GetToken();
-            user = await this._userService.GetUser(userId, tokenResponse);
-
-            this.SaveUserInApplicationCache(user);
+            var tokenResponse = await this._tokenService.GetToken();
+            var user = await this._userService.GetUser(userId, tokenResponse);
 
             return user;
-        }
-
-        private Boolean TryGetUserFromCache(String key, out User user)
-        {
-            return this._applicationCache.MemoryCache.TryGetValue(
-                key,
-                out user);
-        }
-
-        private void SaveUserInApplicationCache(User user)
-        {
-            if (user == null)
-            {
-                return;
-            }
-
-            var cacheEntryOptions = new MemoryCacheEntryOptions()
-                .SetSize(ApplicationCacheEntrySizes.User)
-                .SetPriority(CacheItemPriority.NeverRemove);
-
-            this._applicationCache.MemoryCache.Set(user.Id, user, cacheEntryOptions);
-            this._applicationCache.MemoryCache.Set(user.Email, user, cacheEntryOptions);
-        }
-
-        private async Task<TokenResponse> GetToken()
-        {
-            if (this.TryGetTokenResponseFromCache(out var tokenResponse))
-            {
-                return tokenResponse;
-            }
-
-            tokenResponse = await this._tokenService.GetToken();
-
-            this.SaveTokenResponseInApplicationCache(tokenResponse);
-
-            return tokenResponse;
-        }
-
-        private Boolean TryGetTokenResponseFromCache(out TokenResponse tokenResponse)
-        {
-            return this._applicationCache.MemoryCache.TryGetValue(
-                ApplicationCacheKeys.TokenResponse,
-                out tokenResponse);
-        }
-
-        private void SaveTokenResponseInApplicationCache(TokenResponse tokenResponse)
-        {
-            var cacheEntryOptions = new MemoryCacheEntryOptions()
-                .SetSize(ApplicationCacheEntrySizes.TokenResponse)
-                .SetAbsoluteExpiration(TimeSpan.FromSeconds(tokenResponse.ExpiresIn * 0.9));
-
-            this._applicationCache.MemoryCache.Set(
-                ApplicationCacheKeys.TokenResponse,
-                tokenResponse,
-                cacheEntryOptions);
         }
     }
 }

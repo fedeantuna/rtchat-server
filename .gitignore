@@ -374,3 +374,6 @@ MigrationBackup/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Secrets
+secrets

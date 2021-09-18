@@ -7,8 +7,10 @@ using System.Net.Mail;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using RTChat.Server.API.Cache;
 using RTChat.Server.API.Constants;
 using RTChat.Server.API.Models;
 
@@ -16,16 +18,56 @@ namespace RTChat.Server.API.Services
 {
     public class UserService : IUserService
     {
+        private readonly IApplicationCache _applicationCache;
         private readonly HttpClient _httpClient;
         private readonly IConfiguration _configuration;
 
-        public UserService(IHttpClientFactory httpClientFactory, IConfiguration configuration)
+        public UserService(IApplicationCache applicationCache, IHttpClientFactory httpClientFactory, IConfiguration configuration)
         {
-            _httpClient = httpClientFactory.CreateClient(HttpClientNames.Auth0ManagementApi);
-            _configuration = configuration;
+            this._applicationCache = applicationCache;
+            this._httpClient = httpClientFactory.CreateClient(HttpClientNames.Auth0ManagementApi);
+            this._configuration = configuration;
         }
         
         public async Task<User> GetUser(String id, TokenResponse tokenResponse)
+        {
+            var cacheEntry = $"{ApplicationCacheKeys.UserPrefix}{id}";
+            var user = await this._applicationCache.MemoryCache.GetOrCreateAsync(cacheEntry, entry =>
+            {
+                entry.SetSize(ApplicationCacheEntrySizes.User);
+
+                return this.GetUserById(id, tokenResponse);
+            });
+            
+            return user;
+        }
+
+        public async Task<User> GetUser(MailAddress mailAddress, TokenResponse tokenResponse)
+        {
+            var cacheEntry = $"{ApplicationCacheKeys.UserPrefix}{mailAddress.Address}";
+            var user = await this._applicationCache.MemoryCache.GetOrCreateAsync(cacheEntry, entry =>
+            {
+                entry.SetSize(ApplicationCacheEntrySizes.User);
+
+                return this.GetUserByEmail(mailAddress.Address, tokenResponse);
+            });
+
+            return user;
+        }
+
+        private async Task<User> GetUserByEmail(String mailAddress, TokenResponse tokenResponse)
+        {
+            var serializedUser = await this.GetSerializedUser(
+                () => this.GetUserByEmailEndpoint(mailAddress),
+                tokenResponse.TokenType,
+                tokenResponse.AccessToken);
+            
+            var user = JsonSerializer.Deserialize<IEnumerable<User>>(serializedUser);
+
+            return user?.FirstOrDefault();
+        }
+
+        private async Task<User> GetUserById(String id, TokenResponse tokenResponse)
         {
             var serializedUser = await this.GetSerializedUser(
                 () => this.GetUserByIdEndpoint(id),
@@ -33,20 +75,8 @@ namespace RTChat.Server.API.Services
                 tokenResponse.AccessToken);
 
             var user = JsonSerializer.Deserialize<User>(serializedUser);
-            
-            return user;
-        }
-        
-        public async Task<User> GetUser(MailAddress mailAddress, TokenResponse tokenResponse)
-        {
-            var serializedUser = await this.GetSerializedUser(
-                () => this.GetUserByEmailEndpoint(mailAddress.Address),
-                tokenResponse.TokenType,
-                tokenResponse.AccessToken);
-            
-            var user = JsonSerializer.Deserialize<IEnumerable<User>>(serializedUser);
 
-            return user?.FirstOrDefault();
+            return user;
         }
 
         private String GetUserByIdEndpoint(String id)
