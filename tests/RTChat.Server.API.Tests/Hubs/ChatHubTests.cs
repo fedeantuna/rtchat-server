@@ -282,7 +282,7 @@ namespace RTChat.Server.API.Tests.Hubs
             const String email = "obiwankenobi@jediorder.rep";
             var currentUserId = this.SetUpUserIdentifier();
             var tokenResponse = this.SetUpTokenResponse();
-            var user = this.SetUpUserById(currentUserId, email, tokenResponse);
+            var user = this.SetUpUserById(currentUserId, email, tokenResponse, null);
             memoryCache.Set($"{ApplicationCacheKeys.ListeningUserPrefix}{currentUserId}", userIds);
             this.SetUpClientsUsers(userIds);
             this.SetUpClientsUser(currentUserId);

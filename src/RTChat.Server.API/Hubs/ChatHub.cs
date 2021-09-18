@@ -139,6 +139,8 @@ namespace RTChat.Server.API.Hubs
 
         private async Task UpdateUserStatus(User currentUser, String status)
         {
+            currentUser.Status = status;
+            
             Boolean listeningUsersEntryExists;
             List<String> listeningUsers;
             
@@ -155,8 +157,6 @@ namespace RTChat.Server.API.Hubs
                     Status = status,
                     UserId = currentUser.Id
                 };
-
-                currentUser.Status = status;
 
                 await this.Clients.Users(listeningUsers).UpdateUserStatus(userStatus);
             }
