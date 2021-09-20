@@ -39,11 +39,11 @@ jobs:
         mkdir ./coverage
         cp ./.coverage/**/coverage.info ./coverage/
 
-    - name: Publish Coverage Report to coveralls.io
-      uses: coverallsapp/github-action@master
+    - name: Upload Coverage Report to codecov
+      uses: codecov/codecov-action@v2
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        path-to-lcov: ./coverage/coverage.info
+        files: ./coverage/coverage.info
+        fail_ci_if_error: true
 
     - name: .NET Publish
       run: dotnet publish -c Release -o '${{ env.AZURE_WEBAPP_PACKAGE_PATH }}/rtchat'
