@@ -10,9 +10,11 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Moq;
 using Moq.Protected;
+using RTChat.Server.API.Cache;
 using RTChat.Server.API.Constants;
 using RTChat.Server.API.Models;
 using RTChat.Server.API.Services;
@@ -29,18 +31,93 @@ namespace RTChat.Server.API.Tests.Services
 
         private const String SendAsync = nameof(SendAsync);
 
+        private readonly Mock<IApplicationCache> _applicationCacheMock;
         private readonly Mock<HttpMessageHandler> _httpMessageHandlerMock;
 
         private readonly UserService _sut;
 
         public UserServiceTests()
         {
+            this._applicationCacheMock = new Mock<IApplicationCache>();
             this._httpMessageHandlerMock = new Mock<HttpMessageHandler>();
 
             var httpClientFactoryMock = this.SetUpHttpClientFactory();
             var configuration = SetUpInMemoryConfiguration();
 
-            this._sut = new UserService(httpClientFactoryMock.Object, configuration);
+            this._sut = new UserService(this._applicationCacheMock.Object, httpClientFactoryMock.Object, configuration);
+        }
+        
+        [Fact]
+        public async Task GetUser_ReturnsUserByIdFromCache_WhenUserIsInMemoryCache()
+        {
+            // Arrange
+            var memoryCache = this.SetUpInMemoryCache();
+            var id = Guid.NewGuid().ToString();
+            var tokenResponse = new TokenResponse
+            {
+                Scope = "test-scope",
+                AccessToken = "test-access-token",
+                ExpiresIn = 42,
+                TokenType = "test-token-type"
+            };
+            
+            var user = new User
+            {
+                Id = id,
+                Email = "obiwankenobi@jediorder.rep",
+                Picture = "some-picture"
+            };
+
+            var cacheEntry = $"{ApplicationCacheKeys.UserPrefix}{id}";
+            memoryCache.Set(cacheEntry, user);
+
+            // Act
+            var result = await this._sut.GetUser(id, tokenResponse);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Equal(user, result);
+        }
+        
+        [Fact]
+        public async Task GetUserById_SavesUserInMemoryCache()
+        {
+            // Arrange
+            const String fields = "user_id,email,picture";
+
+            var memoryCache = this.SetUpInMemoryCache();
+            var id = Guid.NewGuid().ToString();
+            var tokenResponse = new TokenResponse
+            {
+                Scope = "test-scope",
+                AccessToken = "test-access-token",
+                ExpiresIn = 42,
+                TokenType = "test-token-type"
+            };
+            var userByIdEndpoint =
+                $"{Auth0ManagementApiBaseAddress}{Auth0ManagementApiUsersByIdEndpoint}/{id}?fields={fields}&include_fields=true";
+
+            var user = new User
+            {
+                Id = id,
+                Email = "obiwankenobi@jediorder.rep",
+                Picture = "some-picture"
+            };
+
+            this.SetUpHttpMessageHandler(userByIdEndpoint, tokenResponse, user);
+
+            await this._sut.GetUser(id, tokenResponse);
+            
+            var cacheEntry = $"{ApplicationCacheKeys.UserPrefix}{id}";
+                
+            // Act
+            var result = memoryCache.Get<User>(cacheEntry);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Equal(user.Id, result.Id);
+            Assert.Equal(user.Email, result.Email);
+            Assert.Equal(user.Picture, result.Picture);
         }
 
         [Fact]
@@ -49,6 +126,7 @@ namespace RTChat.Server.API.Tests.Services
             // Arrange
             const String fields = "user_id,email,picture";
 
+            this.SetUpInMemoryCache();
             var id = Guid.NewGuid().ToString();
             var tokenResponse = new TokenResponse
             {
@@ -85,6 +163,7 @@ namespace RTChat.Server.API.Tests.Services
             // Arrange
             const String fields = "user_id,email,picture";
 
+            this.SetUpInMemoryCache();
             var id = Guid.NewGuid().ToString();
             var tokenResponse = new TokenResponse
             {
@@ -104,6 +183,84 @@ namespace RTChat.Server.API.Tests.Services
             // Assert
             await Assert.ThrowsAsync<HttpRequestException>(User);
         }
+        
+        [Fact]
+        public async Task GetUser_ReturnsUserByEmailFromCache_WhenUserIsInMemoryCache()
+        {
+            // Arrange
+            var memoryCache = this.SetUpInMemoryCache();
+            const String email = "obiwankenobi@jediorder.rep";
+            var mailAddress = new MailAddress(email);
+            var id = Guid.NewGuid().ToString();
+            var tokenResponse = new TokenResponse
+            {
+                Scope = "test-scope",
+                AccessToken = "test-access-token",
+                ExpiresIn = 42,
+                TokenType = "test-token-type"
+            };
+          
+            var user = new User
+            {
+                Id = id,
+                Email = email,
+                Picture = "some-picture"
+            };
+            
+            var cacheEntry = $"{ApplicationCacheKeys.UserPrefix}{email}";
+            memoryCache.Set(cacheEntry, user);
+
+            // Act
+            var result = await this._sut.GetUser(mailAddress, tokenResponse);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Equal(user.Id, result.Id);
+            Assert.Equal(user.Email, result.Email);
+            Assert.Equal(user.Picture, result.Picture);
+        }
+        
+        [Fact]
+        public async Task GetUserByEmail_SavesUserInMemoryCache()
+        {
+            // Arrange
+            var memoryCache = this.SetUpInMemoryCache();
+            const String fields = "user_id,email,picture";
+
+            const String email = "obiwankenobi@jediorder.rep";
+            var mailAddress = new MailAddress(email);
+            var id = Guid.NewGuid().ToString();
+            var tokenResponse = new TokenResponse
+            {
+                Scope = "test-scope",
+                AccessToken = "test-access-token",
+                ExpiresIn = 42,
+                TokenType = "test-token-type"
+            };
+            var userByEmailEndpoint =
+                $"{Auth0ManagementApiBaseAddress}{Auth0ManagementApiUsersByEmailEndpoint}?fields={fields}&include_fields=true&email={email}";
+
+            var user = new User
+            {
+                Id = id,
+                Email = email,
+                Picture = "some-picture"
+            };
+
+            this.SetUpHttpMessageHandlerWithListOfUserResponse(userByEmailEndpoint, tokenResponse, new[] { user });
+
+            await this._sut.GetUser(mailAddress, tokenResponse);
+            
+            var cacheEntry = $"{ApplicationCacheKeys.UserPrefix}{email}";
+            // Act
+            var result = memoryCache.Set(cacheEntry, user);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Equal(user.Id, result.Id);
+            Assert.Equal(user.Email, result.Email);
+            Assert.Equal(user.Picture, result.Picture);
+        }
 
         [Fact]
         public async Task GetUser_ReturnsUserByEmail()
@@ -111,6 +268,7 @@ namespace RTChat.Server.API.Tests.Services
             // Arrange
             const String fields = "user_id,email,picture";
 
+            this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
             var mailAddress = new MailAddress(email);
             var id = Guid.NewGuid().ToString();
@@ -149,6 +307,7 @@ namespace RTChat.Server.API.Tests.Services
             // Arrange
             const String fields = "user_id,email,picture";
 
+            this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
             var mailAddress = new MailAddress(email);
             var tokenResponse = new TokenResponse
@@ -176,6 +335,7 @@ namespace RTChat.Server.API.Tests.Services
             // Arrange
             const String fields = "user_id,email,picture";
 
+            this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
             var mailAddress = new MailAddress(email);
             var tokenResponse = new TokenResponse
@@ -203,6 +363,7 @@ namespace RTChat.Server.API.Tests.Services
             // Arrange
             const String fields = "user_id,email,picture";
 
+            this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
             var mailAddress = new MailAddress(email);
             var tokenResponse = new TokenResponse
@@ -291,6 +452,14 @@ namespace RTChat.Server.API.Tests.Services
                 .Returns(httpClient);
 
             return httpClientFactoryMock;
+        }
+        
+        private IMemoryCache SetUpInMemoryCache()
+        {
+            var memoryCache = new MemoryCache(new MemoryCacheOptions());
+            this._applicationCacheMock.SetupGet(ac => ac.MemoryCache).Returns(memoryCache);
+
+            return memoryCache;
         }
 
         private static IConfiguration SetUpInMemoryConfiguration()

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net.Mail;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -15,6 +16,8 @@ namespace RTChat.Server.API.Hubs
     [Authorize]
     public class ChatHub : Hub<IChatHub>
     {
+        private static readonly Object Lock = new();
+        
         private readonly IApplicationCache _applicationCache;
         private readonly ITokenService _tokenService;
         private readonly IUserService _userService;
@@ -28,13 +31,15 @@ namespace RTChat.Server.API.Hubs
 
         public async Task StartConversation(String email)
         {
-            var user = await this.GetUserByEmail(email);
+            var currentUserId = this.GetCurrentUserId();
+
+            var user = await this.GetUserByEmailOrDefault(email);
 
             if (user != null)
             {
                 user.Status ??= Status.Offline;
 
-                await this.Groups.AddToGroupAsync(this.Context.ConnectionId, user.Id);
+                this.SetListeningUsers(currentUserId, user.Id);
             }
 
             await this.Clients.Caller.StartConversation(user);
@@ -42,173 +47,232 @@ namespace RTChat.Server.API.Hubs
 
         public async Task UpdateUserStatus(String status)
         {
-            var userId = this.Context.UserIdentifier;
+            var currentUserId = this.GetCurrentUserId();
 
-            if (String.IsNullOrEmpty(userId))
+            var currentUser = await this.GetUserByIdOrDefault(currentUserId);
+
+            if (currentUser == null)
             {
-                throw new NullUserIdentifierException();
+                throw new NullUserException(currentUserId);
             }
 
-            var user = await this.GetUserById(userId);
-
-            if (user == null)
-            {
-                throw new NullUserException(userId);
-            }
-            
-            user.Status = status;
-            this.SaveUserInApplicationCache(user);
-
-            var userStatus = new UserStatus
-            {
-                Status = status,
-                UserId = userId
-            };
-
-            await this.Clients.Group(userId).UpdateUserStatus(userStatus);
+            await this.UpdateUserStatus(currentUser, status);
+            await this.SyncUserStatus(currentUser);
         }
 
         public async Task SendMessage(OutgoingMessage outgoingMessage)
         {
-            if (String.IsNullOrEmpty(outgoingMessage.Content) || String.IsNullOrWhiteSpace(outgoingMessage.Content))
+            var currentUserId = this.GetCurrentUserId();
+            
+            ValidateOutgoingMessage(outgoingMessage);
+
+            var currentUser = await this.GetUserById(currentUserId);
+
+            var receiver = await this.GetUserById(outgoingMessage.ReceiverId);
+
+            await this.SendMessage(currentUser, receiver, outgoingMessage.Content);
+        }
+
+        public override async Task OnConnectedAsync()
+        {
+            var currentUserId = this.GetCurrentUserId();
+
+            var activeConnectionsForUser = this.IncrementActiveConnectionsForUser(currentUserId);
+            
+            if (activeConnectionsForUser == 1)
             {
-                throw new EmptyMessageException();
+                await this.UpdateUserStatus(Status.Online);
             }
-            
-            var senderId = this.Context.UserIdentifier;
-            
-            if (String.IsNullOrEmpty(senderId) || String.IsNullOrEmpty(outgoingMessage.ReceiverId))
+        }
+
+        public override async Task OnDisconnectedAsync(Exception exception)
+        {
+            var currentUserId = this.GetCurrentUserId();
+
+            var activeConnectionsForUser = this.DecrementActiveConnectionsForUser(currentUserId);
+
+            if (activeConnectionsForUser == 0)
+            {
+                await this.UpdateUserStatus(Status.Offline);
+            }
+        }
+
+        private String GetCurrentUserId()
+        {
+            var currentUserId = this.Context.UserIdentifier;
+
+            if (String.IsNullOrEmpty(currentUserId))
             {
                 throw new NullUserIdentifierException();
             }
 
-            var sender = await this.GetUserById(senderId);
+            return currentUserId;
+        }
 
-            if (sender == null)
+        private void SetListeningUsers(String currentUserId, String receiverId)
+        {
+            List<String> listeningUsersOnReceiver;
+            List<String> listeningUsersOnCurrentUser;
+
+            lock (Lock)
             {
-                throw new NullUserException(senderId);
+                var listeningUsersOnReceiverCacheEntry = $"{ApplicationCacheKeys.ListeningUserPrefix}{receiverId}";
+                listeningUsersOnReceiver = this._applicationCache.MemoryCache.GetOrCreate(listeningUsersOnReceiverCacheEntry, entry =>
+                {
+                    entry.SetSize(ApplicationCacheEntrySizes.ListeningUser);
+
+                    return new List<String>();
+                });
+                    
+                var listeningUsersOnCurrentUserCacheEntry = $"{ApplicationCacheKeys.ListeningUserPrefix}{currentUserId}";
+                listeningUsersOnCurrentUser = this._applicationCache.MemoryCache.GetOrCreate(listeningUsersOnCurrentUserCacheEntry, entry =>
+                {
+                    entry.SetSize(ApplicationCacheEntrySizes.ListeningUser);
+
+                    return new List<String>();
+                });
+            }
+
+            listeningUsersOnReceiver.Add(currentUserId);
+            listeningUsersOnCurrentUser.Add(receiverId);
+        }
+
+        private async Task UpdateUserStatus(User currentUser, String status)
+        {
+            currentUser.Status = status;
+            
+            Boolean listeningUsersEntryExists;
+            List<String> listeningUsers;
+            
+            lock (Lock)
+            {
+                var listeningUsersCacheEntry = $"{ApplicationCacheKeys.ListeningUserPrefix}{currentUser.Id}";
+                listeningUsersEntryExists = this._applicationCache.MemoryCache.TryGetValue(listeningUsersCacheEntry, out listeningUsers);
             }
             
-            var receiver = await this.GetUserById(outgoingMessage.ReceiverId);
-            
-            if (receiver == null)
+            if (listeningUsersEntryExists)
             {
-                throw new NullUserException(outgoingMessage.ReceiverId);
+                var userStatus = new UserStatus
+                {
+                    Status = status,
+                    UserId = currentUser.Id
+                };
+
+                await this.Clients.Users(listeningUsers).UpdateUserStatus(userStatus);
+            }
+        }
+        
+        private async Task SyncUserStatus(User currentUser)
+        {
+            lock (Lock)
+            {
+                var currentUserCacheEntry = $"{ApplicationCacheKeys.UserPrefix}{currentUser.Email}";
+                this._applicationCache.MemoryCache.Set(currentUserCacheEntry, currentUser,
+                    new MemoryCacheEntryOptions().SetSize(ApplicationCacheEntrySizes.User));
             }
 
+            await this.Clients.User(currentUser.Id).SyncCurrentUserStatus(currentUser.Status);
+        }
+        
+        private async Task SendMessage(User sender, User receiver, String messageContent)
+        {
             var message = new Message
             {
                 Sender = sender,
                 Receiver = receiver,
-                Content = outgoingMessage.Content
+                Content = messageContent
             };
 
-            if (senderId != receiver.Id)
+            if (sender.Id != receiver.Id)
             {
                 await this.Clients.User(receiver.Id).ReceiveMessage(message);
             }
 
             await this.Clients.Caller.ReceiveMessage(message);
         }
-
-        public override async Task OnConnectedAsync()
+        
+        private Int32 IncrementActiveConnectionsForUser(String userId)
         {
-            await this.UpdateUserStatus(Status.Online);
+            Int32 activeConnectionsForUser;
+            
+            lock (Lock)
+            {
+                var entryCache = $"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{userId}";
+                activeConnectionsForUser = this._applicationCache.MemoryCache.GetOrCreate(entryCache, entry =>
+                {
+                    entry.SetSize(ApplicationCacheEntrySizes.ActiveConnectionsForUser);
+
+                    return 0;
+                });
+                
+                this._applicationCache.MemoryCache.Set($"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{userId}",
+                    ++activeConnectionsForUser,
+                    new MemoryCacheEntryOptions().SetSize(ApplicationCacheEntrySizes.ActiveConnectionsForUser));
+            }
+
+            return activeConnectionsForUser;
         }
 
-        public override async Task OnDisconnectedAsync(Exception exception)
+        private Int32 DecrementActiveConnectionsForUser(String userId)
         {
-            await this.UpdateUserStatus(Status.Offline);
+            Int32 activeConnectionsForUser;
+            
+            lock (Lock)
+            {
+                activeConnectionsForUser =
+                    this._applicationCache.MemoryCache.Get<Int32>($"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{userId}");
+                this._applicationCache.MemoryCache.Set($"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{userId}",
+                    --activeConnectionsForUser,
+                    new MemoryCacheEntryOptions().SetSize(ApplicationCacheEntrySizes.ActiveConnectionsForUser));
+            }
+
+            return activeConnectionsForUser;
         }
 
-        private async Task<User> GetUserByEmail(String email)
+        private async Task<User> GetUserByEmailOrDefault(String email)
         {
             if (!MailAddress.TryCreate(email, out var mailAddress))
             {
                 throw new NullUserIdentifierException();
             }
 
-            if (this.TryGetUserFromCache(email, out var user))
-            {
-                return user;
-            }
-
-            var tokenResponse = await this.GetToken();
-            user = await this._userService.GetUser(mailAddress, tokenResponse);
-
-            this.SaveUserInApplicationCache(user);
+            var tokenResponse = await this._tokenService.GetToken();
+            var user = await this._userService.GetUser(mailAddress, tokenResponse);
 
             return user;
         }
 
+        private async Task<User> GetUserByIdOrDefault(String userId)
+        {
+            var tokenResponse = await this._tokenService.GetToken();
+            var user = await this._userService.GetUser(userId, tokenResponse);
+
+            return user;
+        }
+        
         private async Task<User> GetUserById(String userId)
         {
-            if (this.TryGetUserFromCache(userId, out var user))
+            var user = await this.GetUserByIdOrDefault(userId);
+
+            if (user == null)
             {
-                return user;
+                throw new NullUserException(userId);
             }
-
-            var tokenResponse = await this.GetToken();
-            user = await this._userService.GetUser(userId, tokenResponse);
-
-            this.SaveUserInApplicationCache(user);
 
             return user;
         }
-
-        private Boolean TryGetUserFromCache(String key, out User user)
+        
+        private static void ValidateOutgoingMessage(OutgoingMessage outgoingMessage)
         {
-            return this._applicationCache.MemoryCache.TryGetValue(
-                key,
-                out user);
-        }
-
-        private void SaveUserInApplicationCache(User user)
-        {
-            if (user == null)
+            if (String.IsNullOrEmpty(outgoingMessage.Content) || String.IsNullOrWhiteSpace(outgoingMessage.Content))
             {
-                return;
+                throw new EmptyMessageException();
             }
 
-            var cacheEntryOptions = new MemoryCacheEntryOptions()
-                .SetSize(ApplicationCacheEntrySizes.User)
-                .SetPriority(CacheItemPriority.NeverRemove);
-
-            this._applicationCache.MemoryCache.Set(user.Id, user, cacheEntryOptions);
-            this._applicationCache.MemoryCache.Set(user.Email, user, cacheEntryOptions);
-        }
-
-        private async Task<TokenResponse> GetToken()
-        {
-            if (this.TryGetTokenResponseFromCache(out var tokenResponse))
+            if (String.IsNullOrEmpty(outgoingMessage.ReceiverId))
             {
-                return tokenResponse;
+                throw new NullUserIdentifierException();
             }
-
-            tokenResponse = await this._tokenService.GetToken();
-
-            this.SaveTokenResponseInApplicationCache(tokenResponse);
-
-            return tokenResponse;
-        }
-
-        private Boolean TryGetTokenResponseFromCache(out TokenResponse tokenResponse)
-        {
-            return this._applicationCache.MemoryCache.TryGetValue(
-                ApplicationCacheKeys.TokenResponse,
-                out tokenResponse);
-        }
-
-        private void SaveTokenResponseInApplicationCache(TokenResponse tokenResponse)
-        {
-            var cacheEntryOptions = new MemoryCacheEntryOptions()
-                .SetSize(ApplicationCacheEntrySizes.TokenResponse)
-                .SetAbsoluteExpiration(TimeSpan.FromSeconds(tokenResponse.ExpiresIn * 0.9));
-
-            this._applicationCache.MemoryCache.Set(
-                ApplicationCacheKeys.TokenResponse,
-                tokenResponse,
-                cacheEntryOptions);
         }
     }
 }

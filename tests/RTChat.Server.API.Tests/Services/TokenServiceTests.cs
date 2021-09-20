@@ -9,10 +9,12 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Moq;
 using Moq.Protected;
+using RTChat.Server.API.Cache;
 using RTChat.Server.API.Constants;
 using RTChat.Server.API.Exceptions;
 using RTChat.Server.API.Models;
@@ -33,6 +35,7 @@ namespace RTChat.Server.API.Tests.Services
 
         private const String SendAsync = nameof(SendAsync);
 
+        private readonly Mock<IApplicationCache> _applicationCacheMock;
         private readonly Mock<HttpMessageHandler> _httpMessageHandlerMock;
 
         private readonly TokenService _sut;
@@ -41,16 +44,82 @@ namespace RTChat.Server.API.Tests.Services
         {
             this._httpMessageHandlerMock = new Mock<HttpMessageHandler>();
 
+            this._applicationCacheMock = new Mock<IApplicationCache>();
             var httpClientFactoryMock = this.SetUpHttpClientFactory();
             var configuration = SetUpInMemoryConfiguration();
 
-            this._sut = new TokenService(httpClientFactoryMock.Object, configuration);
+            this._sut = new TokenService(this._applicationCacheMock.Object, httpClientFactoryMock.Object, configuration);
         }
 
         [Fact]
-        public async Task GetToken_ReturnsTokenResponse()
+        public async Task GetToken_ReturnsTokenResponseFromCache_WhenTokenIsInMemoryCache()
         {
             // Arrange
+            var memoryCache = this.SetUpInMemoryCache();
+            var tokenResponse = new TokenResponse
+            {
+                Scope = "test-scope",
+                AccessToken = "test-access-token",
+                ExpiresIn = 42,
+                TokenType = "test-token-type"
+            };
+
+            memoryCache.Set(ApplicationCacheKeys.TokenResponse, tokenResponse);
+
+            // Act
+            var result = await this._sut.GetToken();
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Equal(tokenResponse, result);
+        }
+        
+        [Fact]
+        public async Task GetToken_SavesTokenInMemoryCache()
+        {
+            // Arrange
+            var memoryCache = this.SetUpInMemoryCache();
+            var tokenRequest = new TokenRequest
+            {
+                Audience = Auth0ManagementApiAudience,
+                ClientId = Auth0ManagementApiClientId,
+                ClientSecret = Auth0ManagementApiClientSecret,
+                GrantType = OpenIdConnectGrantTypes.ClientCredentials
+            };
+            var serializedTokenRequest = JsonSerializer.Serialize(tokenRequest);
+            var content = new StringContent(serializedTokenRequest, Encoding.UTF8, MediaTypeNames.Application.Json);
+            var endpoint = $"{Auth0ManagementApiBaseAddress}{Auth0ManagementApiTokenEndpoint}";
+
+            var contentAsString = await content.ReadAsStringAsync();
+
+            var tokenResponse = new TokenResponse
+            {
+                Scope = "test-scope",
+                AccessToken = "test-access-token",
+                ExpiresIn = 42,
+                TokenType = "test-token-type"
+            };
+
+            this.SetUpHttpMessageHandler(endpoint, contentAsString, tokenResponse);
+
+            await this._sut.GetToken();
+
+            // Act
+            var result = memoryCache.Get<TokenResponse>(ApplicationCacheKeys.TokenResponse);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Equal(tokenResponse.Scope, result.Scope);
+            Assert.Equal(tokenResponse.AccessToken, result.AccessToken);
+            Assert.Equal(tokenResponse.ExpiresIn, result.ExpiresIn);
+            Assert.Equal(tokenResponse.TokenType, result.TokenType);
+        }
+        
+        [Fact]
+        public async Task GetToken_ReturnsTokenResponseFromHttp_WhenTokenIsNotInMemory()
+        {
+            // Arrange
+            this.SetUpInMemoryCache();
             var tokenRequest = new TokenRequest
             {
                 Audience = Auth0ManagementApiAudience,
@@ -78,6 +147,7 @@ namespace RTChat.Server.API.Tests.Services
             var result = await this._sut.GetToken();
 
             // Assert
+            Assert.NotNull(result);
             Assert.Equal(tokenResponse.Scope, result.Scope);
             Assert.Equal(tokenResponse.AccessToken, result.AccessToken);
             Assert.Equal(tokenResponse.ExpiresIn, result.ExpiresIn);
@@ -88,6 +158,7 @@ namespace RTChat.Server.API.Tests.Services
         public async Task GetToken_ThrowsNullTokenException_WhenTokenResponseIsNull()
         {
             // Arrange
+            this.SetUpInMemoryCache();
             var tokenRequest = new TokenRequest
             {
                 Audience = Auth0ManagementApiAudience,
@@ -114,6 +185,7 @@ namespace RTChat.Server.API.Tests.Services
         public async Task GetToken_ThrowsHttpRequestException_WhenResponseIsNotOk()
         {
             // Arrange
+            this.SetUpInMemoryCache();
             var tokenRequest = new TokenRequest
             {
                 Audience = Auth0ManagementApiAudience,
@@ -184,6 +256,14 @@ namespace RTChat.Server.API.Tests.Services
                 .Returns(httpClient);
 
             return httpClientFactoryMock;
+        }
+        
+        private IMemoryCache SetUpInMemoryCache()
+        {
+            var memoryCache = new MemoryCache(new MemoryCacheOptions());
+            this._applicationCacheMock.SetupGet(ac => ac.MemoryCache).Returns(memoryCache);
+
+            return memoryCache;
         }
 
         private static IConfiguration SetUpInMemoryConfiguration()

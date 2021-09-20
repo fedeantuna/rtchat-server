@@ -1,7 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Mail;
-using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
@@ -39,8 +39,7 @@ namespace RTChat.Server.API.Tests.Hubs
             this._hubCallerContextMock = new Mock<HubCallerContext>();
             this._groupManagerMock = new Mock<IGroupManager>();
 
-            this._sut = new ChatHub(this._applicationCacheMock.Object, this._tokenServiceMock.Object,
-                this._userServiceMock.Object)
+            this._sut = new ChatHub(this._applicationCacheMock.Object, this._tokenServiceMock.Object, this._userServiceMock.Object)
             {
                 Clients = this._hubCallerClientsMock.Object,
                 Context = this._hubCallerContextMock.Object,
@@ -48,15 +47,18 @@ namespace RTChat.Server.API.Tests.Hubs
             };
         }
 
+        #region StartConversation
+
         [Fact]
         public async Task StartConversation_CallsStartConversationOnCallerClient_WithUser()
         {
             // Arrange
             const String email = "obiwankenobi@jediorder.rep";
 
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            var user = this.SetUpUserByEmailUsingService(email, tokenResponse);
+            this.SetUpInMemoryCache();
+            this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            var user = this.SetUpUserByEmail(email, tokenResponse);
             var chatHubCallerMock = this.SetUpClientsCaller();
 
             // Act
@@ -68,34 +70,54 @@ namespace RTChat.Server.API.Tests.Hubs
         }
 
         [Fact]
-        public async Task StartConversation_AddsConnectionToUserIdGroup_WhenUserExists()
+        public async Task StartConversation_CallsStartConversationOnCallerClient_WithNull_WhenUserIsNull()
         {
             // Arrange
             const String email = "obiwankenobi@jediorder.rep";
 
-            var connectionId = this.SetUpConnectionId();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            var user = this.SetUpUserByEmailUsingService(email, tokenResponse);
+            this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpNullUserByEmail(email, tokenResponse);
+            var chatHubCallerMock = this.SetUpClientsCaller();
+
+            // Act
+            await this._sut.StartConversation(email);
+
+            // Assert
+            this._hubCallerClientsMock.VerifyGet(hcc => hcc.Caller, Times.Once);
+            chatHubCallerMock.Verify(chu => chu.StartConversation(null), Times.Once);
+        }
+
+        [Fact]
+        public async Task StartConversation_AddsCurrentUserIdIdToListeningUsersForUser()
+        {
+            // Arrange
+            const String email = "obiwankenobi@jediorder.rep";
+
+            var memoryCache = this.SetUpInMemoryCache();
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            var user = this.SetUpUserByEmail(email, tokenResponse);
             this.SetUpClientsCaller();
 
             // Act
             await this._sut.StartConversation(email);
 
             // Assert
-            this._groupManagerMock.Verify(gm => gm.AddToGroupAsync(connectionId, user.Id, CancellationToken.None),
-                Times.Once);
+            Assert.Collection(memoryCache.Get<List<String>>($"{ApplicationCacheKeys.ListeningUserPrefix}{user.Id}"),
+                item => Assert.Equal(currentUserId, item));
         }
 
         [Fact]
-        public async Task StartConversation_SetsUserStatusToOfflineIsStatusIsNull()
+        public async Task StartConversation_SetsUserStatusToOffline_WhenUserStatusIsNull()
         {
             // Arrange
             const String email = "obiwankenobi@jediorder.rep";
 
-            this.SetUpApplicationMemoryCache();
-            this.SetUpTokenResponseUsingApplicationCache();
-            var user = this.SetUpUserByEmailUsingApplicationCache(email, null);
+            this.SetUpInMemoryCache();
+            this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            var user = this.SetUpUserByEmail(email, tokenResponse);
             var chatHubCallerMock = this.SetUpClientsCaller();
 
             // Act
@@ -108,33 +130,15 @@ namespace RTChat.Server.API.Tests.Hubs
         }
 
         [Fact]
-        public async Task StartConversation_DoesNotAddConnectionToUserIdGroup_WhenUserDoesNotExist()
+        public async Task StartConversation_GetsUserByEmail()
         {
             // Arrange
             const String email = "obiwankenobi@jediorder.rep";
 
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpNullUserByEmailUsingService(email, tokenResponse);
-            this.SetUpClientsCaller();
-
-            // Act
-            await this._sut.StartConversation(email);
-
-            // Assert
-            this._groupManagerMock.Verify(
-                gm => gm.AddToGroupAsync(It.IsAny<String>(), It.IsAny<String>(), CancellationToken.None), Times.Never);
-        }
-
-        [Fact]
-        public async Task StartConversation_UsesTokenService_WhenEntryIsNotInCache()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByEmailUsingService(email, tokenResponse);
+            this.SetUpInMemoryCache();
+            this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserByEmail(email, tokenResponse);
             this.SetUpClientsCaller();
 
             // Act
@@ -142,129 +146,17 @@ namespace RTChat.Server.API.Tests.Hubs
 
             // Assert
             this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Once);
-        }
-        
-        [Fact]
-        public async Task StartConversation_SavesEntryInCache_AfterUsingTokenService()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByEmailUsingService(email, tokenResponse);
-            this.SetUpClientsCaller();
-
-            // Act
-            await this._sut.StartConversation(email);
-
-            // Assert
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Once);
-            Assert.Equal(tokenResponse, applicationMemoryCache.Get<TokenResponse>(ApplicationCacheKeys.TokenResponse));
-        }
-
-        [Fact]
-        public async Task StartConversation_UsesCacheInsteadOfTokenService_WhenEntryIsInCache()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpUserByEmailUsingService(email, tokenResponse);
-            this.SetUpClientsCaller();
-
-            // Act
-            await this._sut.StartConversation(email);
-
-            // Assert
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Never);
-        }
-
-        [Fact]
-        public async Task StartConversation_UsesUserService_WhenEntryIsNotInCache()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpUserByEmailUsingService(email, tokenResponse);
-            this.SetUpClientsCaller();
-
-            // Act
-            await this._sut.StartConversation(email);
-
-            // Assert
             this._userServiceMock.Verify(us => us.GetUser(It.Is<MailAddress>(ma => ma.Address == email), tokenResponse),
                 Times.Once);
         }
-        
-        [Fact]
-        public async Task StartConversation_SavesEntriesInCache_AfterUsingUserService()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
 
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            var user = this.SetUpUserByEmailUsingService(email, tokenResponse);
-            this.SetUpClientsCaller();
-
-            // Act
-            await this._sut.StartConversation(email);
-
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(It.Is<MailAddress>(ma => ma.Address == email), tokenResponse),
-                Times.Once);
-            Assert.Equal(user, applicationMemoryCache.Get<User>(user.Id));
-            Assert.Equal(user, applicationMemoryCache.Get<User>(email));
-        }
-
-        [Fact]
-        public async Task StartConversation_DoesNotSaveEntryInCache_WhenUserIsNull()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-
-            this.SetUpConnectionId();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpNullUserByEmailUsingService(email, tokenResponse);
-            this.SetUpClientsCaller();
-
-            // Act
-            await this._sut.StartConversation(email);
-
-            // Assert
-            Assert.False(applicationMemoryCache.TryGetValue(email, out _));
-        }
-        
-        [Fact]
-        public async Task StartConversation_UsesCacheInsteadOfUserService_WhenEntryIsInCache()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-
-            this.SetUpApplicationMemoryCache();
-            this.SetUpTokenResponseUsingService();
-            this.SetUpUserByEmailUsingApplicationCache(email);
-            this.SetUpClientsCaller();
-
-            // Act
-            await this._sut.StartConversation(email);
-
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(It.IsAny<MailAddress>(), It.IsAny<TokenResponse>()),
-                Times.Never);
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Never);
-        }
-        
         [Fact]
         public async Task StartConversation_ThrowsNullUserIdentifierException_WhenEmailIsNotValid()
         {
             // Arrange
             const String email = "obi-wan";
+
+            this.SetUpUserIdentifier();
 
             // Act
             Task StartConversation() => this._sut.StartConversation(email);
@@ -274,195 +166,144 @@ namespace RTChat.Server.API.Tests.Hubs
         }
 
         [Fact]
-        public async Task UpdateUserStatus_CallsUpdateUserStatusOnUserIdGroup_WithUserStatus()
+        public async Task StartConversation_ThrowsNullUserIdentifierException_WhenUserIdentifierInContextIsNull()
+        {
+            // Arrange
+            const String email = "obiwankenobi@jediorder.rep";
+
+            this.SetUpNullUserIdentifier();
+
+            // Act
+            Task StartConversation() => this._sut.StartConversation(email);
+
+            // Assert
+            await Assert.ThrowsAsync<NullUserIdentifierException>(StartConversation);
+        }
+
+        [Fact]
+        public async Task StartConversation_ThrowsNullUserIdentifierException_WhenUserIdentifierInContextIsEmpty()
+        {
+            // Arrange
+            const String email = "obiwankenobi@jediorder.rep";
+
+            this.SetUpEmptyUserIdentifier();
+
+            // Act
+            Task StartConversation() => this._sut.StartConversation(email);
+
+            // Assert
+            await Assert.ThrowsAsync<NullUserIdentifierException>(StartConversation);
+        }
+
+        #endregion
+
+        #region UpdateUserStatus
+        
+        [Fact]
+        public async Task UpdateUserStatus_CallsSyncCurrentUserStatusOnClientsCurrentUser_WithStatus()
         {
             // Arrange
             const String status = Status.Busy;
+            var userIds = new List<String>();
 
+            var memoryCache = this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            var chatHubGroupMock = this.SetUpClientsGroup(userId);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, email, tokenResponse);
+            memoryCache.Set($"{ApplicationCacheKeys.ListeningUserPrefix}{currentUserId}", userIds);
+            this.SetUpClientsUsers(userIds);
+            var chatHubClientsUserMock = this.SetUpClientsUser(currentUserId);
 
             // Act
             await this._sut.UpdateUserStatus(status);
 
             // Assert
-            this._hubCallerClientsMock.Verify(hcc => hcc.Group(userId), Times.Once);
-            chatHubGroupMock.Verify(
-                ch => ch.UpdateUserStatus(It.Is<UserStatus>(us => us.Status == status && us.UserId == userId)),
-                Times.Once);
+            this._hubCallerClientsMock.Verify(hcc => hcc.User(currentUserId), Times.Once);
+            chatHubClientsUserMock.Verify(ch => ch.SyncCurrentUserStatus(status), Times.Once);
         }
 
         [Fact]
-        public async Task UpdateUserStatus_UsesTokenService_WhenEntryIsNotInCache()
+        public async Task UpdateUserStatus_CallsUpdateUserStatusOnListeningUsers_WithUserStatus()
+        {
+            // Arrange
+            const String status = Status.Busy;
+            var userIds = new List<String>();
+
+            var memoryCache = this.SetUpInMemoryCache();
+            const String email = "obiwankenobi@jediorder.rep";
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, email, tokenResponse);
+            memoryCache.Set($"{ApplicationCacheKeys.ListeningUserPrefix}{currentUserId}", userIds);
+            var chatHubClientsUsersMock = this.SetUpClientsUsers(userIds);
+            this.SetUpClientsUser(currentUserId);
+
+            // Act
+            await this._sut.UpdateUserStatus(status);
+
+            // Assert
+            this._hubCallerClientsMock.Verify(hcc => hcc.Users(userIds), Times.Once);
+            chatHubClientsUsersMock.Verify(ch =>
+                ch.UpdateUserStatus(It.Is<UserStatus>(us => us.Status == status && us.UserId == currentUserId)), Times.Once);
+        }
+
+        [Fact]
+        public async Task UpdateUserStatus_GetsUserById()
         {
             // Arrange
             const String status = Status.Busy;
 
+            this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, email, tokenResponse);
+            this.SetUpClientsGroup(currentUserId);
+            this.SetUpClientsUser(currentUserId);
 
             // Act
             await this._sut.UpdateUserStatus(status);
 
             // Assert
             this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Once);
-        }
-
-        [Fact]
-        public async Task UpdateUserStatus_SavesEntryInCache_AfterUsingTokenService()
-        {
-            // Arrange
-            const String status = Status.Busy;
-
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.UpdateUserStatus(status);
-
-            // Assert
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Once);
-            Assert.Equal(tokenResponse, applicationMemoryCache.Get<TokenResponse>(ApplicationCacheKeys.TokenResponse));
-        }
-        
-        [Fact]
-        public async Task UpdateUserStatus_UsesCacheInsteadOfTokenService_WhenEntryIsInCache()
-        {
-            // Arrange
-            const String status = Status.Busy;
-
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.UpdateUserStatus(status);
-
-            // Assert
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Never);
-        }
-
-        [Fact]
-        public async Task UpdateUserStatus_UsesUserService_WhenEntryIsNotInCache()
-        {
-            // Arrange
-            const String status = Status.Busy;
-
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.UpdateUserStatus(status);
-
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(userId, tokenResponse),
+            this._userServiceMock.Verify(us => us.GetUser(currentUserId, tokenResponse),
                 Times.Once);
         }
 
         [Fact]
-        public async Task UpdateUserStatus_SavesEntriesInCache_AfterUsingUserService()
+        public async Task UpdateUserStatus_UpdatesUserStatusOnMemoryCache()
         {
             // Arrange
             const String status = Status.Busy;
+            var userIds = new List<String>();
 
+            var memoryCache = this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            var user = this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            var user = this.SetUpUserById(currentUserId, email, tokenResponse, null);
+            memoryCache.Set($"{ApplicationCacheKeys.ListeningUserPrefix}{currentUserId}", userIds);
+            this.SetUpClientsUsers(userIds);
+            this.SetUpClientsUser(currentUserId);
 
-            // Act
             await this._sut.UpdateUserStatus(status);
+            
+            var userByIdCacheEntry = $"{ApplicationCacheKeys.UserPrefix}{currentUserId}";
+            var userByEmailCacheEntry = $"{ApplicationCacheKeys.UserPrefix}{email}";
 
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(userId, tokenResponse),
-                Times.Once);
-            Assert.Equal(user, applicationMemoryCache.Get<User>(user.Id));
-            Assert.Equal(user, applicationMemoryCache.Get<User>(email));
-        }
-        
-        [Fact]
-        public async Task UpdateUserStatus_DoesNotSaveEntryInCache_WhenUserIsNull()
-        {
-            // Arrange
-            const String status = Status.Busy;
-
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpNullUserByIdUsingService(userId, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
+            memoryCache.Set(userByIdCacheEntry, user);
+            memoryCache.Set(userByEmailCacheEntry, user);
+            
             // Act
-            Task UpdateUserStatus() => this._sut.UpdateUserStatus(status);
+            var userById = memoryCache.Get<User>(userByIdCacheEntry);
+            var userByEmail = memoryCache.Get<User>(userByEmailCacheEntry);
 
             // Assert
-            await Assert.ThrowsAsync<NullUserException>(UpdateUserStatus);
-            Assert.False(applicationMemoryCache.TryGetValue(userId, out _));
-            Assert.False(applicationMemoryCache.TryGetValue(email, out _));
-        }
-        
-        [Fact]
-        public async Task UpdateUserStatus_UsesCacheInsteadOfUserService_WhenEntryIsInCache()
-        {
-            // Arrange
-            const String status = Status.Busy;
-
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingApplicationCache(userId, email);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.UpdateUserStatus(status);
-
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(It.IsAny<String>(), It.IsAny<TokenResponse>()),
-                Times.Never);
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Never);
-        }
-
-        [Fact]
-        public async Task UpdateUserStatus_UpdatesStatusOnCachedEntry()
-        {
-            // Arrange
-            const String status = Status.Busy;
-
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingApplicationCache(userId, email, Status.Away);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.UpdateUserStatus(status);
-
-            // Assert
-            Assert.Equal(status, applicationMemoryCache.Get<User>(userId).Status);
+            Assert.NotNull(userById);
+            Assert.NotNull(userByEmail);
+            Assert.Equal(status, userById.Status);
+            Assert.Equal(status, userByEmail.Status);
         }
 
         [Fact]
@@ -501,11 +342,9 @@ namespace RTChat.Server.API.Tests.Hubs
             // Arrange
             const String status = Status.Busy;
 
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpNullUserByIdUsingService(userId, tokenResponse);
-            this.SetUpClientsGroup(userId);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpNullUserById(currentUserId, tokenResponse);
 
             // Act
             Task UpdateUserStatus() => this._sut.UpdateUserStatus(status);
@@ -513,6 +352,10 @@ namespace RTChat.Server.API.Tests.Hubs
             // Assert
             await Assert.ThrowsAsync<NullUserException>(UpdateUserStatus);
         }
+
+        #endregion
+
+        #region SendMessage
 
         [Fact]
         public async Task SendMessage_CallsReceiveMessageOnCallerClient_WithMessage()
@@ -526,13 +369,12 @@ namespace RTChat.Server.API.Tests.Hubs
                 Content = messageContent
             };
 
-            const String senderEmail = "obiwankenobi@jediorder.rep";
+            const String currentUserEmail = "obiwankenobi@jediorder.rep";
             const String receiverEmail = "generalgrievous@droidarmy.sep";
-            var senderId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            var sender = this.SetUpUserByIdUsingService(senderId, senderEmail, tokenResponse);
-            var receiver = this.SetUpUserByIdUsingService(receiverId, receiverEmail, tokenResponse);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            var sender = this.SetUpUserById(currentUserId, currentUserEmail, tokenResponse);
+            var receiver = this.SetUpUserById(receiverId, receiverEmail, tokenResponse);
             this.SetUpClientsUser(receiverId);
             var chatHubCallerMock = this.SetUpClientsCaller();
 
@@ -545,7 +387,7 @@ namespace RTChat.Server.API.Tests.Hubs
                 ch.ReceiveMessage(It.Is<Message>(m =>
                     m.Sender == sender && m.Receiver == receiver && m.Content == messageContent)), Times.Once);
         }
-        
+
         [Fact]
         public async Task SendMessage_CallsReceiveMessageOnReceiverUserClient_WithMessage()
         {
@@ -558,13 +400,12 @@ namespace RTChat.Server.API.Tests.Hubs
                 Content = messageContent
             };
 
-            const String senderEmail = "obiwankenobi@jediorder.rep";
+            const String currentUserEmail = "obiwankenobi@jediorder.rep";
             const String receiverEmail = "generalgrievous@droidarmy.sep";
-            var senderId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            var sender = this.SetUpUserByIdUsingService(senderId, senderEmail, tokenResponse);
-            var receiver = this.SetUpUserByIdUsingService(receiverId, receiverEmail, tokenResponse);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            var sender = this.SetUpUserById(currentUserId, currentUserEmail, tokenResponse);
+            var receiver = this.SetUpUserById(receiverId, receiverEmail, tokenResponse);
             var chatHubUserMock = this.SetUpClientsUser(receiverId);
             this.SetUpClientsCaller();
 
@@ -576,26 +417,26 @@ namespace RTChat.Server.API.Tests.Hubs
                 ch.ReceiveMessage(It.Is<Message>(m =>
                     m.Sender == sender && m.Receiver == receiver && m.Content == messageContent)), Times.Once);
         }
-        
+
         [Fact]
-        public async Task SendMessage_DoesNotCallReceiveMessageOnReceiverUserClient_WhenSenderAndReceiverAreTheSameUser()
+        public async Task
+            SendMessage_DoesNotCallReceiveMessageOnReceiverUserClient_WhenSenderAndReceiverAreTheSameUser()
         {
             // Arrange
             const String messageContent = "Hello there!";
-            var senderId = this.SetUpUserIdentifier();
+            var currentUserId = this.SetUpUserIdentifier();
             var outgoingMessage = new OutgoingMessage
             {
-                ReceiverId = senderId,
+                ReceiverId = currentUserId,
                 Content = messageContent
             };
 
-            const String senderEmail = "obiwankenobi@jediorder.rep";
+            const String currentUserEmail = "obiwankenobi@jediorder.rep";
             const String receiverEmail = "generalgrievous@droidarmy.sep";
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            var sender = this.SetUpUserByIdUsingService(senderId, senderEmail, tokenResponse);
-            var receiver = this.SetUpUserByIdUsingService(senderId, receiverEmail, tokenResponse);
-            var chatHubUserMock = this.SetUpClientsUser(senderId);
+            var tokenResponse = this.SetUpTokenResponse();
+            var sender = this.SetUpUserById(currentUserId, currentUserEmail, tokenResponse);
+            var receiver = this.SetUpUserById(currentUserId, receiverEmail, tokenResponse);
+            var chatHubUserMock = this.SetUpClientsUser(currentUserId);
             this.SetUpClientsCaller();
 
             // Act
@@ -606,9 +447,9 @@ namespace RTChat.Server.API.Tests.Hubs
                 ch.ReceiveMessage(It.Is<Message>(m =>
                     m.Sender == sender && m.Receiver == receiver && m.Content == messageContent)), Times.Never);
         }
-        
+
         [Fact]
-        public async Task SendMessage_UsesTokenService_WhenEntryIsNotInCache()
+        public async Task SendMessage_GetsUserById_ForCurrentUserAndReceiver()
         {
             // Arrange
             const String messageContent = "Hello there!";
@@ -619,13 +460,12 @@ namespace RTChat.Server.API.Tests.Hubs
                 Content = messageContent
             };
 
-            const String senderEmail = "obiwankenobi@jediorder.rep";
+            const String currentUserEmail = "obiwankenobi@jediorder.rep";
             const String receiverEmail = "generalgrievous@droidarmy.sep";
-            var senderId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(senderId, senderEmail, tokenResponse);
-            this.SetUpUserByIdUsingService(receiverId, receiverEmail, tokenResponse);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, currentUserEmail, tokenResponse);
+            this.SetUpUserById(receiverId, receiverEmail, tokenResponse);
             this.SetUpClientsUser(receiverId);
             this.SetUpClientsCaller();
 
@@ -633,195 +473,13 @@ namespace RTChat.Server.API.Tests.Hubs
             await this._sut.SendMessage(outgoingMessage);
 
             // Assert
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Once);
-        }
-        
-        [Fact]
-        public async Task SendMessage_SavesEntryInCache_AfterUsingTokenService()
-        {
-            // Arrange
-            const String messageContent = "Hello there!";
-            var receiverId = Guid.NewGuid().ToString();
-            var outgoingMessage = new OutgoingMessage
-            {
-                ReceiverId = receiverId,
-                Content = messageContent
-            };
-
-            const String senderEmail = "obiwankenobi@jediorder.rep";
-            const String receiverEmail = "generalgrievous@droidarmy.sep";
-            var senderId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(senderId, senderEmail, tokenResponse);
-            this.SetUpUserByIdUsingService(receiverId, receiverEmail, tokenResponse);
-            this.SetUpClientsUser(receiverId);
-            this.SetUpClientsCaller();
-
-            // Act
-            await this._sut.SendMessage(outgoingMessage);
-
-            // Assert
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Once);
-            Assert.Equal(tokenResponse, applicationMemoryCache.Get<TokenResponse>(ApplicationCacheKeys.TokenResponse));
-        }
-        
-        [Fact]
-        public async Task SendMessage_UsesUserService_WhenEntryIsNotInCache()
-        {
-            // Arrange
-            const String messageContent = "Hello there!";
-            var receiverId = Guid.NewGuid().ToString();
-            var outgoingMessage = new OutgoingMessage
-            {
-                ReceiverId = receiverId,
-                Content = messageContent
-            };
-
-            const String senderEmail = "obiwankenobi@jediorder.rep";
-            const String receiverEmail = "generalgrievous@droidarmy.sep";
-            var senderId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(senderId, senderEmail, tokenResponse);
-            this.SetUpUserByIdUsingService(receiverId, receiverEmail, tokenResponse);
-            this.SetUpClientsUser(receiverId);
-            this.SetUpClientsCaller();
-
-            // Act
-            await this._sut.SendMessage(outgoingMessage);
-
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(senderId, tokenResponse), Times.Once);
-            this._userServiceMock.Verify(us => us.GetUser(receiverId, tokenResponse), Times.Once);
-        }
-        
-        [Fact]
-        public async Task SendMessage_SavesEntriesInCache_AfterUsingUserService()
-        {
-            // Arrange
-            const String messageContent = "Hello there!";
-            var receiverId = Guid.NewGuid().ToString();
-            var outgoingMessage = new OutgoingMessage
-            {
-                ReceiverId = receiverId,
-                Content = messageContent
-            };
-
-            const String senderEmail = "obiwankenobi@jediorder.rep";
-            const String receiverEmail = "generalgrievous@droidarmy.sep";
-            var senderId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            var sender = this.SetUpUserByIdUsingService(senderId, senderEmail, tokenResponse);
-            var receiver = this.SetUpUserByIdUsingService(receiverId, receiverEmail, tokenResponse);
-            this.SetUpClientsUser(receiverId);
-            this.SetUpClientsCaller();
-
-            // Act
-            await this._sut.SendMessage(outgoingMessage);
-
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(senderId, tokenResponse), Times.Once);
-            this._userServiceMock.Verify(us => us.GetUser(receiverId, tokenResponse), Times.Once);
-            Assert.Equal(sender, applicationMemoryCache.Get<User>(senderId));
-            Assert.Equal(sender, applicationMemoryCache.Get<User>(senderEmail));
-            Assert.Equal(receiver, applicationMemoryCache.Get<User>(receiverId));
-            Assert.Equal(receiver, applicationMemoryCache.Get<User>(receiverEmail));
-        }
-        
-        [Fact]
-        public async Task SendMessage_DoesNotSaveEntryInCache_WhenSenderUserIsNull()
-        {
-            // Arrange
-            const String messageContent = "Hello there!";
-            var receiverId = Guid.NewGuid().ToString();
-            var outgoingMessage = new OutgoingMessage
-            {
-                ReceiverId = receiverId,
-                Content = messageContent
-            };
-
-            const String senderEmail = "obiwankenobi@jediorder.rep";
-            const String receiverEmail = "generalgrievous@droidarmy.sep";
-            var senderId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpNullUserByIdUsingService(senderId, tokenResponse);
-            this.SetUpUserByIdUsingService(receiverId, receiverEmail, tokenResponse);
-            this.SetUpClientsUser(receiverId);
-            this.SetUpClientsCaller();
-
-            // Act
-            Task SendMessage() => this._sut.SendMessage(outgoingMessage);
-
-            // Assert
-            await Assert.ThrowsAsync<NullUserException>(SendMessage);
-            Assert.False(applicationMemoryCache.TryGetValue(senderId, out _));
-            Assert.False(applicationMemoryCache.TryGetValue(senderEmail, out _));
-        }
-        
-        [Fact]
-        public async Task SendMessage_DoesNotSaveEntryInCache_WhenReceiverUserIsNull()
-        {
-            // Arrange
-            const String messageContent = "Hello there!";
-            var receiverId = Guid.NewGuid().ToString();
-            var outgoingMessage = new OutgoingMessage
-            {
-                ReceiverId = receiverId,
-                Content = messageContent
-            };
-
-            const String senderEmail = "obiwankenobi@jediorder.rep";
-            const String receiverEmail = "generalgrievous@droidarmy.sep";
-            var senderId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(senderId, senderEmail, tokenResponse);
-            this.SetUpNullUserByIdUsingService(receiverId, tokenResponse);
-            this.SetUpClientsUser(receiverId);
-            this.SetUpClientsCaller();
-
-            // Act
-            Task SendMessage() => this._sut.SendMessage(outgoingMessage);
-
-            // Assert
-            await Assert.ThrowsAsync<NullUserException>(SendMessage);
-            Assert.False(applicationMemoryCache.TryGetValue(receiverId, out _));
-            Assert.False(applicationMemoryCache.TryGetValue(receiverEmail, out _));
+            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Exactly(2));
+            this._userServiceMock.Verify(us => us.GetUser(currentUserId, tokenResponse),
+                Times.Once);
+            this._userServiceMock.Verify(us => us.GetUser(receiverId, tokenResponse),
+                Times.Once);
         }
 
-        [Fact]
-        public async Task SendMessage_UsesCacheInsteadOfUserService_WhenEntryIsInCache()
-        {
-            // Arrange
-            const String messageContent = "Hello there!";
-            var receiverId = Guid.NewGuid().ToString();
-            var outgoingMessage = new OutgoingMessage
-            {
-                ReceiverId = receiverId,
-                Content = messageContent
-            };
-
-            const String senderEmail = "obiwankenobi@jediorder.rep";
-            const String receiverEmail = "generalgrievous@droidarmy.sep";
-            var senderId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingApplicationCache(senderId, senderEmail);
-            this.SetUpUserByIdUsingApplicationCache(receiverId, receiverEmail);
-            this.SetUpClientsUser(receiverId);
-            this.SetUpClientsCaller();
-
-            // Act
-            await this._sut.SendMessage(outgoingMessage);
-
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(senderId, tokenResponse), Times.Never);
-            this._userServiceMock.Verify(us => us.GetUser(receiverId, tokenResponse), Times.Never);
-        }
-        
         [Fact]
         public async Task SendMessage_ThrowsEmptyMessageException_WhenMessageContentIsNull()
         {
@@ -833,8 +491,8 @@ namespace RTChat.Server.API.Tests.Hubs
                 ReceiverId = receiverId,
                 Content = messageContent
             };
-
-            this.SetUpNullUserIdentifier();
+            
+            this.SetUpUserIdentifier();
 
             // Act
             Task SendMessage() => this._sut.SendMessage(outgoingMessage);
@@ -842,7 +500,7 @@ namespace RTChat.Server.API.Tests.Hubs
             // Assert
             await Assert.ThrowsAsync<EmptyMessageException>(SendMessage);
         }
-        
+
         [Fact]
         public async Task SendMessage_ThrowsEmptyMessageException_WhenMessageContentIsEmpty()
         {
@@ -855,7 +513,7 @@ namespace RTChat.Server.API.Tests.Hubs
                 Content = messageContent
             };
 
-            this.SetUpNullUserIdentifier();
+            this.SetUpUserIdentifier();
 
             // Act
             Task SendMessage() => this._sut.SendMessage(outgoingMessage);
@@ -863,7 +521,7 @@ namespace RTChat.Server.API.Tests.Hubs
             // Assert
             await Assert.ThrowsAsync<EmptyMessageException>(SendMessage);
         }
-        
+
         [Fact]
         public async Task SendMessage_ThrowsEmptyMessageException_WhenMessageContentIsWhiteSpaces()
         {
@@ -875,8 +533,8 @@ namespace RTChat.Server.API.Tests.Hubs
                 ReceiverId = receiverId,
                 Content = messageContent
             };
-
-            this.SetUpNullUserIdentifier();
+            
+            this.SetUpUserIdentifier();
 
             // Act
             Task SendMessage() => this._sut.SendMessage(outgoingMessage);
@@ -884,7 +542,7 @@ namespace RTChat.Server.API.Tests.Hubs
             // Assert
             await Assert.ThrowsAsync<EmptyMessageException>(SendMessage);
         }
-        
+
         [Fact]
         public async Task SendMessage_ThrowsNullUserIdentifierException_WhenUserIdentifierIsNull()
         {
@@ -905,27 +563,7 @@ namespace RTChat.Server.API.Tests.Hubs
             // Assert
             await Assert.ThrowsAsync<NullUserIdentifierException>(SendMessage);
         }
-        
-        [Fact]
-        public async Task SendMessage_ThrowsNullUserIdentifierException_WhenReceiverIdUserIsNull()
-        {
-            // Arrange
-            const String messageContent = "Hello there!";
-            var outgoingMessage = new OutgoingMessage
-            {
-                ReceiverId = null,
-                Content = messageContent
-            };
 
-            this.SetUpUserIdentifier();
-
-            // Act
-            Task SendMessage() => this._sut.SendMessage(outgoingMessage);
-
-            // Assert
-            await Assert.ThrowsAsync<NullUserIdentifierException>(SendMessage);
-        }
-        
         [Fact]
         public async Task SendMessage_ThrowsNullUserIdentifierException_WhenUserIdentifierIsEmpty()
         {
@@ -946,7 +584,27 @@ namespace RTChat.Server.API.Tests.Hubs
             // Assert
             await Assert.ThrowsAsync<NullUserIdentifierException>(SendMessage);
         }
-        
+
+        [Fact]
+        public async Task SendMessage_ThrowsNullUserIdentifierException_WhenReceiverIdUserIsNull()
+        {
+            // Arrange
+            const String messageContent = "Hello there!";
+            var outgoingMessage = new OutgoingMessage
+            {
+                ReceiverId = null,
+                Content = messageContent
+            };
+
+            this.SetUpUserIdentifier();
+
+            // Act
+            Task SendMessage() => this._sut.SendMessage(outgoingMessage);
+
+            // Assert
+            await Assert.ThrowsAsync<NullUserIdentifierException>(SendMessage);
+        }
+
         [Fact]
         public async Task SendMessage_ThrowsNullUserIdentifierException_WhenReceiverIdUserIsEmpty()
         {
@@ -966,9 +624,9 @@ namespace RTChat.Server.API.Tests.Hubs
             // Assert
             await Assert.ThrowsAsync<NullUserIdentifierException>(SendMessage);
         }
-        
+
         [Fact]
-        public async Task SendMessage_ThrowsNullUserException_WhenSenderUserIsNull()
+        public async Task SendMessage_ThrowsNullUserException_WhenCurrentUserIsNull()
         {
             // Arrange
             const String messageContent = "Hello there!";
@@ -979,10 +637,9 @@ namespace RTChat.Server.API.Tests.Hubs
                 Content = messageContent
             };
 
-            var senderId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpNullUserByIdUsingService(senderId, tokenResponse);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpNullUserById(currentUserId, tokenResponse);
 
             // Act
             Task SendMessage() => this._sut.SendMessage(outgoingMessage);
@@ -990,7 +647,7 @@ namespace RTChat.Server.API.Tests.Hubs
             // Assert
             await Assert.ThrowsAsync<NullUserException>(SendMessage);
         }
-        
+
         [Fact]
         public async Task SendMessage_ThrowsNullUserException_WhenReceiverUserIsNull()
         {
@@ -1004,11 +661,10 @@ namespace RTChat.Server.API.Tests.Hubs
             };
 
             const String senderEmail = "obiwankenobi@jediorder.rep";
-            var senderId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(senderId, senderEmail, tokenResponse);
-            this.SetUpNullUserByIdUsingService(receiverId, tokenResponse);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, senderEmail, tokenResponse);
+            this.SetUpNullUserById(receiverId, tokenResponse);
 
             // Act
             Task SendMessage() => this._sut.SendMessage(outgoingMessage);
@@ -1016,183 +672,102 @@ namespace RTChat.Server.API.Tests.Hubs
             // Assert
             await Assert.ThrowsAsync<NullUserException>(SendMessage);
         }
+
+        #endregion
+
+        #region OnConnectedAsync
         
         [Fact]
-        public async Task OnConnectedAsync_CallsUpdateUserStatusOnUserIdGroup_WithUserStatus()
+        public async Task OnConnectedAsync_CallsSyncCurrentUserStatusOnClientsCurrentUser_WithOnlineUserStatus_WhenThereIsOnlyOneActiveConnection()
         {
             // Arrange
-            const String status = Status.Online;
+            var userIds = new List<String>();
 
+            var memoryCache = this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            var chatHubGroupMock = this.SetUpClientsGroup(userId);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, email, tokenResponse);
+            memoryCache.Set($"{ApplicationCacheKeys.ListeningUserPrefix}{currentUserId}", userIds);
+            this.SetUpClientsUsers(userIds);
+            var chatHubClientsUserMock = this.SetUpClientsUser(currentUserId);
 
             // Act
             await this._sut.OnConnectedAsync();
 
             // Assert
-            this._hubCallerClientsMock.Verify(hcc => hcc.Group(userId), Times.Once);
-            chatHubGroupMock.Verify(
-                ch => ch.UpdateUserStatus(It.Is<UserStatus>(us => us.Status == status && us.UserId == userId)),
-                Times.Once);
+            this._hubCallerClientsMock.Verify(hcc => hcc.User(currentUserId), Times.Once);
+            chatHubClientsUserMock.Verify(ch => ch.SyncCurrentUserStatus(Status.Online), Times.Once);
         }
 
         [Fact]
-        public async Task OnConnectedAsync_UsesTokenService_WhenEntryIsNotInCache()
+        public async Task OnConnectedAsync_CallsUpdateUserStatusOnListeningUsers_WithOnlineUserStatus_WhenThereIsOnlyOneActiveConnection()
         {
             // Arrange
+            var userIds = new List<String>();
+
+            var memoryCache = this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, email, tokenResponse);
+            memoryCache.Set($"{ApplicationCacheKeys.ListeningUserPrefix}{currentUserId}", userIds);
+            var chatHubClientsUsersMock = this.SetUpClientsUsers(userIds);
+            this.SetUpClientsUser(currentUserId);
+
+            // Act
+            await this._sut.OnConnectedAsync();
+
+            // Assert
+            this._hubCallerClientsMock.Verify(hcc => hcc.Users(userIds), Times.Once);
+            chatHubClientsUsersMock.Verify(ch =>
+                ch.UpdateUserStatus(It.Is<UserStatus>(us => us.Status == Status.Online && us.UserId == currentUserId)), Times.Once);
+        }
+
+        [Fact]
+        public async Task OnConnectedAsync_GetsUserById_WhenThereIsOnlyOneActiveConnection()
+        {
+            // Arrange
+            this.SetUpInMemoryCache();
+            const String email = "obiwankenobi@jediorder.rep";
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, email, tokenResponse);
+            this.SetUpClientsGroup(currentUserId);
+            this.SetUpClientsUser(currentUserId);
 
             // Act
             await this._sut.OnConnectedAsync();
 
             // Assert
             this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Once);
-        }
-
-        [Fact]
-        public async Task OnConnectedAsync_SavesEntryInCache_AfterUsingTokenService()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.OnConnectedAsync();
-
-            // Assert
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Once);
-            Assert.Equal(tokenResponse, applicationMemoryCache.Get<TokenResponse>(ApplicationCacheKeys.TokenResponse));
-        }
-        
-        [Fact]
-        public async Task OnConnectedAsync_UsesCacheInsteadOfTokenService_WhenEntryIsInCache()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.OnConnectedAsync();
-
-            // Assert
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Never);
-        }
-
-        [Fact]
-        public async Task OnConnectedAsync_UsesUserService_WhenEntryIsNotInCache()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.OnConnectedAsync();
-
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(userId, tokenResponse),
+            this._userServiceMock.Verify(us => us.GetUser(currentUserId, tokenResponse),
                 Times.Once);
         }
-
+        
         [Fact]
-        public async Task OnConnectedAsync_SavesEntriesInCache_AfterUsingUserService()
+        public async Task OnConnectedAsync_DoesNotCallUpdateUserStatus_WhenThereIsNotOnlyOneActiveConnection()
         {
             // Arrange
+            var memoryCache = this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            var user = this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, email, tokenResponse);
+            this.SetUpClientsGroup(currentUserId);
+            var chatHubClientsUsersMock = this.SetUpClientsUsers(new List<String>());
+            
+            var entryCache = $"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{currentUserId}";
+            memoryCache.Set(entryCache, 1);
 
             // Act
             await this._sut.OnConnectedAsync();
 
             // Assert
-            this._userServiceMock.Verify(us => us.GetUser(userId, tokenResponse),
-                Times.Once);
-            Assert.Equal(user, applicationMemoryCache.Get<User>(user.Id));
-            Assert.Equal(user, applicationMemoryCache.Get<User>(email));
-        }
-        
-        [Fact]
-        public async Task OnConnectedAsync_DoesNotSaveEntryInCache_WhenUserIsNull()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpNullUserByIdUsingService(userId, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            Task UpdateUserStatus() => this._sut.OnConnectedAsync();
-
-            // Assert
-            await Assert.ThrowsAsync<NullUserException>(UpdateUserStatus);
-            Assert.False(applicationMemoryCache.TryGetValue(userId, out _));
-            Assert.False(applicationMemoryCache.TryGetValue(email, out _));
-        }
-        
-        [Fact]
-        public async Task OnConnectedAsync_UsesCacheInsteadOfUserService_WhenEntryIsInCache()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingApplicationCache(userId, email);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.OnConnectedAsync();
-
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(It.IsAny<String>(), It.IsAny<TokenResponse>()),
-                Times.Never);
+            this._hubCallerClientsMock.Verify(hcc => hcc.Users(It.IsAny<List<String>>()), Times.Never);
+            chatHubClientsUsersMock.Verify(ch => ch.UpdateUserStatus(It.IsAny<UserStatus>()), Times.Never);
             this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Never);
-        }
-
-        [Fact]
-        public async Task OnConnectedAsync_UpdatesStatusOnCachedEntry()
-        {
-            // Arrange
-            const String status = Status.Online;
-
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingApplicationCache(userId, email, Status.Away);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.OnConnectedAsync();
-
-            // Assert
-            Assert.Equal(status, applicationMemoryCache.Get<User>(userId).Status);
+            this._userServiceMock.Verify(us => us.GetUser(It.IsAny<String>(), It.IsAny<TokenResponse>()), Times.Never);
         }
 
         [Fact]
@@ -1202,10 +777,10 @@ namespace RTChat.Server.API.Tests.Hubs
             this.SetUpNullUserIdentifier();
 
             // Act
-            Task UpdateUserStatus() => this._sut.OnConnectedAsync();
+            Task OnConnectedAsync() => this._sut.OnConnectedAsync();
 
             // Assert
-            await Assert.ThrowsAsync<NullUserIdentifierException>(UpdateUserStatus);
+            await Assert.ThrowsAsync<NullUserIdentifierException>(OnConnectedAsync);
         }
 
         [Fact]
@@ -1215,205 +790,132 @@ namespace RTChat.Server.API.Tests.Hubs
             this.SetUpEmptyUserIdentifier();
 
             // Act
-            Task UpdateUserStatus() => this._sut.OnConnectedAsync();
+            Task OnConnectedAsync() => this._sut.OnConnectedAsync();
 
             // Assert
-            await Assert.ThrowsAsync<NullUserIdentifierException>(UpdateUserStatus);
+            await Assert.ThrowsAsync<NullUserIdentifierException>(OnConnectedAsync);
         }
 
         [Fact]
         public async Task OnConnectedAsync_ThrowsNullUserException_WhenUserIsNull()
         {
             // Arrange
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpNullUserByIdUsingService(userId, tokenResponse);
-            this.SetUpClientsGroup(userId);
+            this.SetUpInMemoryCache();
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpNullUserById(currentUserId, tokenResponse);
 
             // Act
-            Task UpdateUserStatus() => this._sut.OnConnectedAsync();
+            Task OnConnectedAsync() => this._sut.OnConnectedAsync();
 
             // Assert
-            await Assert.ThrowsAsync<NullUserException>(UpdateUserStatus);
+            await Assert.ThrowsAsync<NullUserException>(OnConnectedAsync);
         }
-        
+
+        #endregion
+
+        #region OnDisconnectedAsync
+
         [Fact]
-        public async Task OnDisconnectedAsync_CallsUpdateUserStatusOnUserIdGroup_WithUserStatus()
+        public async Task OnDisconnectedAsync_CallsSyncCurrentUserStatusOnClientsCurrentUser_WithUserStatusOffline_WhenThereAreNoActiveConnectionsLeft()
         {
             // Arrange
-            const String status = Status.Offline;
+            var userIds = new List<String>();
 
+            var memoryCache = this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            var chatHubGroupMock = this.SetUpClientsGroup(userId);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, email, tokenResponse);
+            memoryCache.Set($"{ApplicationCacheKeys.ListeningUserPrefix}{currentUserId}", userIds);
+            this.SetUpClientsUsers(userIds);
+            var chatHubClientsUserMock = this.SetUpClientsUser(currentUserId);
+            
+            var entryCache = $"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{currentUserId}";
+            memoryCache.Set(entryCache, 1);
 
             // Act
             await this._sut.OnDisconnectedAsync(null);
 
             // Assert
-            this._hubCallerClientsMock.Verify(hcc => hcc.Group(userId), Times.Once);
-            chatHubGroupMock.Verify(
-                ch => ch.UpdateUserStatus(It.Is<UserStatus>(us => us.Status == status && us.UserId == userId)),
-                Times.Once);
+            this._hubCallerClientsMock.Verify(hcc => hcc.User(currentUserId), Times.Once);
+            chatHubClientsUserMock.Verify(ch => ch.SyncCurrentUserStatus(Status.Offline), Times.Once);
+        }
+        
+        [Fact]
+        public async Task OnDisconnectedAsync_CallsUpdateUserStatusOnListeningUsers_WithUserStatusOffline_WhenThereAreNoActiveConnectionsLeft()
+        {
+            // Arrange
+            var userIds = new List<String>();
+
+            var memoryCache = this.SetUpInMemoryCache();
+            const String email = "obiwankenobi@jediorder.rep";
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, email, tokenResponse);
+            memoryCache.Set($"{ApplicationCacheKeys.ListeningUserPrefix}{currentUserId}", userIds);
+            var chatHubClientsUsersMock = this.SetUpClientsUsers(userIds);
+            this.SetUpClientsUser(currentUserId);
+            
+            var entryCache = $"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{currentUserId}";
+            memoryCache.Set(entryCache, 1);
+
+            // Act
+            await this._sut.OnDisconnectedAsync(null);
+
+            // Assert
+            this._hubCallerClientsMock.Verify(hcc => hcc.Users(userIds), Times.Once);
+            chatHubClientsUsersMock.Verify(ch =>
+                ch.UpdateUserStatus(It.Is<UserStatus>(us => us.Status == Status.Offline && us.UserId == currentUserId)), Times.Once);
         }
 
         [Fact]
-        public async Task OnDisconnectedAsync_UsesTokenService_WhenEntryIsNotInCache()
+        public async Task OnDisconnectedAsync_GetsUserById_WhenThereAreNoActiveConnectionsLeft()
         {
             // Arrange
+            var memoryCache = this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, email, tokenResponse);
+            this.SetUpClientsGroup(currentUserId);
+            this.SetUpClientsUser(currentUserId);
+            
+            var entryCache = $"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{currentUserId}";
+            memoryCache.Set(entryCache, 1);
 
             // Act
             await this._sut.OnDisconnectedAsync(null);
 
             // Assert
             this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Once);
-        }
-
-        [Fact]
-        public async Task OnDisconnectedAsync_SavesEntryInCache_AfterUsingTokenService()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.OnDisconnectedAsync(null);
-
-            // Assert
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Once);
-            Assert.Equal(tokenResponse, applicationMemoryCache.Get<TokenResponse>(ApplicationCacheKeys.TokenResponse));
-        }
-        
-        [Fact]
-        public async Task OnDisconnectedAsync_UsesCacheInsteadOfTokenService_WhenEntryIsInCache()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.OnDisconnectedAsync(null);
-
-            // Assert
-            this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Never);
-        }
-
-        [Fact]
-        public async Task OnDisconnectedAsync_UsesUserService_WhenEntryIsNotInCache()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.OnDisconnectedAsync(null);
-
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(userId, tokenResponse),
+            this._userServiceMock.Verify(us => us.GetUser(currentUserId, tokenResponse),
                 Times.Once);
         }
-
+        
         [Fact]
-        public async Task OnDisconnectedAsync_SavesEntriesInCache_AfterUsingUserService()
+        public async Task OnDisconnectedAsync_DoesNotCallUpdateUserStatus_WhenThereIsAtLeastOneActiveConnectionLeft()
         {
             // Arrange
+            var memoryCache = this.SetUpInMemoryCache();
             const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            var user = this.SetUpUserByIdUsingService(userId, email, tokenResponse);
-            this.SetUpClientsGroup(userId);
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpUserById(currentUserId, email, tokenResponse);
+            this.SetUpClientsGroup(currentUserId);
+            var chatHubClientsUsersMock = this.SetUpClientsUsers(new List<String>());
+            
+            var entryCache = $"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{currentUserId}";
+            memoryCache.Set(entryCache, 2);
 
             // Act
             await this._sut.OnDisconnectedAsync(null);
 
             // Assert
-            this._userServiceMock.Verify(us => us.GetUser(userId, tokenResponse),
-                Times.Once);
-            Assert.Equal(user, applicationMemoryCache.Get<User>(user.Id));
-            Assert.Equal(user, applicationMemoryCache.Get<User>(email));
-        }
-        
-        [Fact]
-        public async Task OnDisconnectedAsync_DoesNotSaveEntryInCache_WhenUserIsNull()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingApplicationCache();
-            this.SetUpNullUserByIdUsingService(userId, tokenResponse);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            Task UpdateUserStatus() => this._sut.OnDisconnectedAsync(null);
-
-            // Assert
-            await Assert.ThrowsAsync<NullUserException>(UpdateUserStatus);
-            Assert.False(applicationMemoryCache.TryGetValue(userId, out _));
-            Assert.False(applicationMemoryCache.TryGetValue(email, out _));
-        }
-        
-        [Fact]
-        public async Task OnDisconnectedAsync_UsesCacheInsteadOfUserService_WhenEntryIsInCache()
-        {
-            // Arrange
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingApplicationCache(userId, email);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.OnDisconnectedAsync(null);
-
-            // Assert
-            this._userServiceMock.Verify(us => us.GetUser(It.IsAny<String>(), It.IsAny<TokenResponse>()),
-                Times.Never);
+            this._hubCallerClientsMock.Verify(hcc => hcc.Users(It.IsAny<List<String>>()), Times.Never);
+            chatHubClientsUsersMock.Verify(ch => ch.UpdateUserStatus(It.IsAny<UserStatus>()), Times.Never);
             this._tokenServiceMock.Verify(ts => ts.GetToken(), Times.Never);
-        }
-
-        [Fact]
-        public async Task OnDisconnectedAsync_UpdatesStatusOnCachedEntry()
-        {
-            // Arrange
-            const String status = Status.Offline;
-
-            const String email = "obiwankenobi@jediorder.rep";
-            var userId = this.SetUpUserIdentifier();
-            var applicationMemoryCache = this.SetUpApplicationMemoryCache();
-            this.SetUpTokenResponseUsingService();
-            this.SetUpUserByIdUsingApplicationCache(userId, email, Status.Away);
-            this.SetUpClientsGroup(userId);
-
-            // Act
-            await this._sut.OnDisconnectedAsync(null);
-
-            // Assert
-            Assert.Equal(status, applicationMemoryCache.Get<User>(userId).Status);
+            this._userServiceMock.Verify(us => us.GetUser(It.IsAny<String>(), It.IsAny<TokenResponse>()), Times.Never);
         }
 
         [Fact]
@@ -1423,10 +925,10 @@ namespace RTChat.Server.API.Tests.Hubs
             this.SetUpNullUserIdentifier();
 
             // Act
-            Task UpdateUserStatus() => this._sut.OnDisconnectedAsync(null);
+            Task OnDisconnectedAsync() => this._sut.OnDisconnectedAsync(null);
 
             // Assert
-            await Assert.ThrowsAsync<NullUserIdentifierException>(UpdateUserStatus);
+            await Assert.ThrowsAsync<NullUserIdentifierException>(OnDisconnectedAsync);
         }
 
         [Fact]
@@ -1436,37 +938,34 @@ namespace RTChat.Server.API.Tests.Hubs
             this.SetUpEmptyUserIdentifier();
 
             // Act
-            Task UpdateUserStatus() => this._sut.OnDisconnectedAsync(null);
+            Task OnDisconnectedAsync() => this._sut.OnDisconnectedAsync(null);
 
             // Assert
-            await Assert.ThrowsAsync<NullUserIdentifierException>(UpdateUserStatus);
+            await Assert.ThrowsAsync<NullUserIdentifierException>(OnDisconnectedAsync);
         }
 
         [Fact]
         public async Task OnDisconnectedAsync_ThrowsNullUserException_WhenUserIsNull()
         {
             // Arrange
-            var userId = this.SetUpUserIdentifier();
-            this.SetUpApplicationMemoryCache();
-            var tokenResponse = this.SetUpTokenResponseUsingService();
-            this.SetUpNullUserByIdUsingService(userId, tokenResponse);
-            this.SetUpClientsGroup(userId);
+            var memoryCache = this.SetUpInMemoryCache();
+            var currentUserId = this.SetUpUserIdentifier();
+            var tokenResponse = this.SetUpTokenResponse();
+            this.SetUpNullUserById(currentUserId, tokenResponse);
+            
+            var entryCache = $"{ApplicationCacheKeys.ActiveConnectionsForUserPrefix}{currentUserId}";
+            memoryCache.Set(entryCache, 1);
 
             // Act
-            Task UpdateUserStatus() => this._sut.OnDisconnectedAsync(null);
+            Task OnDisconnectedAsync() => this._sut.OnDisconnectedAsync(null);
 
             // Assert
-            await Assert.ThrowsAsync<NullUserException>(UpdateUserStatus);
+            await Assert.ThrowsAsync<NullUserException>(OnDisconnectedAsync);
         }
 
-        private String SetUpConnectionId()
-        {
-            var connectionId = Guid.NewGuid().ToString();
+        #endregion
 
-            this._hubCallerContextMock.SetupGet(hcc => hcc.ConnectionId).Returns(connectionId);
-
-            return connectionId;
-        }
+        #region Private Helpers
 
         private String SetUpUserIdentifier()
         {
@@ -1487,15 +986,7 @@ namespace RTChat.Server.API.Tests.Hubs
             this._hubCallerContextMock.SetupGet(hcc => hcc.UserIdentifier).Returns(String.Empty);
         }
 
-        private MemoryCache SetUpApplicationMemoryCache()
-        {
-            var memoryCache = new MemoryCache(new MemoryCacheOptions());
-            this._applicationCacheMock.SetupGet(ac => ac.MemoryCache).Returns(memoryCache);
-
-            return memoryCache;
-        }
-
-        private TokenResponse SetUpTokenResponseUsingService()
+        private TokenResponse SetUpTokenResponse()
         {
             var tokenResponse = new TokenResponse
             {
@@ -1509,23 +1000,7 @@ namespace RTChat.Server.API.Tests.Hubs
             return tokenResponse;
         }
 
-        private TokenResponse SetUpTokenResponseUsingApplicationCache()
-        {
-            var tokenResponse = new TokenResponse
-            {
-                Scope = "test-scope",
-                AccessToken = Guid.NewGuid().ToString(),
-                ExpiresIn = 3600,
-                TokenType = "test-type"
-            };
-
-            this._applicationCacheMock.Object.MemoryCache.Set(ApplicationCacheKeys.TokenResponse, tokenResponse);
-
-            return tokenResponse;
-        }
-
-        private User SetUpUserByEmailUsingService(String email, TokenResponse tokenResponse,
-            String status = Status.Online)
+        private User SetUpUserByEmail(String email, TokenResponse tokenResponse, String status = null)
         {
             var user = new User
             {
@@ -1543,23 +1018,7 @@ namespace RTChat.Server.API.Tests.Hubs
             return user;
         }
 
-        private User SetUpUserByEmailUsingApplicationCache(String email, String status = Status.Online)
-        {
-            var user = new User
-            {
-                Id = Guid.NewGuid().ToString(),
-                Email = email,
-                Picture = "some-picture",
-                Status = status
-            };
-
-            this._applicationCacheMock.Object.MemoryCache.Set(user.Id, user);
-            this._applicationCacheMock.Object.MemoryCache.Set(user.Email, user);
-
-            return user;
-        }
-
-        private void SetUpNullUserByEmailUsingService(String email, TokenResponse tokenResponse)
+        private void SetUpNullUserByEmail(String email, TokenResponse tokenResponse)
         {
             this._userServiceMock
                 .Setup(us =>
@@ -1567,7 +1026,7 @@ namespace RTChat.Server.API.Tests.Hubs
                 .ReturnsAsync(() => null);
         }
 
-        private User SetUpUserByIdUsingService(String id, String email, TokenResponse tokenResponse,
+        private User SetUpUserById(String id, String email, TokenResponse tokenResponse,
             String status = Status.Online)
         {
             var user = new User
@@ -1586,21 +1045,7 @@ namespace RTChat.Server.API.Tests.Hubs
             return user;
         }
 
-        private void SetUpUserByIdUsingApplicationCache(String id, String email, String status = Status.Online)
-        {
-            var user = new User
-            {
-                Id = id,
-                Email = email,
-                Picture = "some-picture",
-                Status = status
-            };
-
-            this._applicationCacheMock.Object.MemoryCache.Set(user.Id, user);
-            this._applicationCacheMock.Object.MemoryCache.Set(user.Email, user);
-        }
-
-        private void SetUpNullUserByIdUsingService(String id, TokenResponse tokenResponse)
+        private void SetUpNullUserById(String id, TokenResponse tokenResponse)
         {
             this._userServiceMock
                 .Setup(us =>
@@ -1624,6 +1069,14 @@ namespace RTChat.Server.API.Tests.Hubs
             return chatHubUserMock;
         }
 
+        private Mock<IChatHub> SetUpClientsUsers(IReadOnlyList<String> userIds)
+        {
+            var chatHubUserMock = new Mock<IChatHub>();
+            this._hubCallerClientsMock.Setup(hcc => hcc.Users(userIds)).Returns(chatHubUserMock.Object);
+
+            return chatHubUserMock;
+        }
+
         private Mock<IChatHub> SetUpClientsCaller()
         {
             var chatHubCallerMock = new Mock<IChatHub>();
@@ -1631,5 +1084,15 @@ namespace RTChat.Server.API.Tests.Hubs
 
             return chatHubCallerMock;
         }
+
+        private IMemoryCache SetUpInMemoryCache()
+        {
+            var memoryCache = new MemoryCache(new MemoryCacheOptions());
+            this._applicationCacheMock.SetupGet(ac => ac.MemoryCache).Returns(memoryCache);
+
+            return memoryCache;
+        }
+
+        #endregion
     }
 }
