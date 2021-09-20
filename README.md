@@ -1,1 +1,1 @@
-[![codecov](https://codecov.io/gh/fedeantuna/rtchat-client/branch/main/graph/badge.svg?token=2JCJKM31BX)](https://codecov.io/gh/fedeantuna/rtchat-client)
+[![codecov](https://codecov.io/gh/fedeantuna/rtchat-server/branch/main/graph/badge.svg?token=VMVCV9DYLC)](https://codecov.io/gh/fedeantuna/rtchat-server)
