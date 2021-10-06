@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Headers;
 using System.Net.Mime;
 using System.Security.Claims;
@@ -20,7 +19,6 @@ using RTChat.Server.API.Services;
 
 namespace RTChat.Server.API
 {
-    [ExcludeFromCodeCoverage] // Testing adds no value here
     public class Startup
     {
         private const String CorsClientPolicyName = "client";
