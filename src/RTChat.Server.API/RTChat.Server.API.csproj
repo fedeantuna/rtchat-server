@@ -9,4 +9,9 @@
       <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="5.0.9" />
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\RTChat.Server.Application\RTChat.Server.Application.csproj" />
+      <ProjectReference Include="..\RTChat.Server.Infrastructure\RTChat.Server.Infrastructure.csproj" />
+    </ItemGroup>
+
 </Project>
