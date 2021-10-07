@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using Moq;
 using RTChat.Server.Domain.Common;
 using Shouldly;
@@ -6,6 +7,7 @@ using Xunit;
 
 namespace RTChat.Server.Domain.UnitTests.Common
 {
+    [ExcludeFromCodeCoverage]
     public class DomainEventTests
     {
         [Fact]
