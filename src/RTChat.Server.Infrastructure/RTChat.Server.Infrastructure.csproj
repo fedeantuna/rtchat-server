@@ -8,4 +8,13 @@
       <ProjectReference Include="..\RTChat.Server.Application\RTChat.Server.Application.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <Folder Include="Persistence" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="5.0.10" />
+      <PackageReference Include="Microsoft.AspNetCore.Authorization" Version="5.0.10" />
+    </ItemGroup>
+
 </Project>

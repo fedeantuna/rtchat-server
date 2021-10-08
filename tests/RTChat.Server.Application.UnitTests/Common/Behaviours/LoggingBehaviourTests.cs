@@ -39,15 +39,15 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
             // Arrange
             var userId = Guid.NewGuid().ToString();
             const String userName = "obi-wan.kenobi";
-            var request = new Mock<IBaseRequest>();
+            var requestMock = new Mock<IBaseRequest>();
             const String requestName = nameof(IBaseRequest);
             var cancellationToken = default(CancellationToken);
 
             this._currentUserServiceMock.Setup(cus => cus.GetUserId()).Returns(userId);
-            this._identityServiceMock.Setup(i => i.GetUserName(userId)).ReturnsAsync(userName);
+            this._identityServiceMock.Setup(i => i.GetUsername(userId)).ReturnsAsync(userName);
             
             // Act
-            await this._sut.Process(request.Object, cancellationToken);
+            await this._sut.Process(requestMock.Object, cancellationToken);
             
             // Assert
             this._loggerMock.Verify(l =>
@@ -57,12 +57,12 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
                                                           && LoggerHelper.CheckValue(state, requestName, LoggingBehaviourMessages.LoggingBehaviourInformationMessageNameParameter)
                                                           && LoggerHelper.CheckValue(state, userId, LoggingBehaviourMessages.LoggingBehaviourInformationMessageUserIdParameter)
                                                           && LoggerHelper.CheckValue(state, userName, LoggingBehaviourMessages.LoggingBehaviourInformationMessageUserNameParameter)
-                                                          && LoggerHelper.CheckValue(state, request.Object, LoggingBehaviourMessages.LoggingBehaviourInformationMessageRequestParameter)),
+                                                          && LoggerHelper.CheckValue(state, requestMock.Object, LoggingBehaviourMessages.LoggingBehaviourInformationMessageRequestParameter)),
                         It.IsAny<Exception>(),
                         (Func<It.IsAnyType, Exception, String>)It.IsAny<Object>()),
                 Times.Once);
             this._currentUserServiceMock.Verify(cus => cus.GetUserId(), Times.Once);
-            this._identityServiceMock.Verify(i => i.GetUserName(userId), Times.Once);
+            this._identityServiceMock.Verify(i => i.GetUsername(userId), Times.Once);
         }
         
         [Fact]
@@ -70,14 +70,14 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         {
             // Arrange
             var userName = String.Empty;
-            var request = new Mock<IBaseRequest>();
+            var requestMock = new Mock<IBaseRequest>();
             const String requestName = nameof(IBaseRequest);
             var cancellationToken = default(CancellationToken);
 
             this._currentUserServiceMock.Setup(cus => cus.GetUserId()).Returns((String)null);
             
             // Act
-            await this._sut.Process(request.Object, cancellationToken);
+            await this._sut.Process(requestMock.Object, cancellationToken);
             
             // Assert
             this._loggerMock.Verify(l =>
@@ -87,12 +87,12 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
                                                           && LoggerHelper.CheckValue(state, requestName, LoggingBehaviourMessages.LoggingBehaviourInformationMessageNameParameter)
                                                           && LoggerHelper.CheckValue(state, String.Empty, LoggingBehaviourMessages.LoggingBehaviourInformationMessageUserIdParameter)
                                                           && LoggerHelper.CheckValue(state, userName, LoggingBehaviourMessages.LoggingBehaviourInformationMessageUserNameParameter)
-                                                          && LoggerHelper.CheckValue(state, request.Object, LoggingBehaviourMessages.LoggingBehaviourInformationMessageRequestParameter)),
+                                                          && LoggerHelper.CheckValue(state, requestMock.Object, LoggingBehaviourMessages.LoggingBehaviourInformationMessageRequestParameter)),
                         It.IsAny<Exception>(),
                         (Func<It.IsAnyType, Exception, String>)It.IsAny<Object>()),
                 Times.Once);
             this._currentUserServiceMock.Verify(cus => cus.GetUserId(), Times.Once);
-            this._identityServiceMock.Verify(i => i.GetUserName(It.IsAny<String>()), Times.Never);
+            this._identityServiceMock.Verify(i => i.GetUsername(It.IsAny<String>()), Times.Never);
         }
     }
 }

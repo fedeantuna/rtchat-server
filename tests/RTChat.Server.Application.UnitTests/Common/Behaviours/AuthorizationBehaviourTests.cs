@@ -34,13 +34,13 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         public async Task Handle_ReturnsRequestHandlerResult_WhenRequestDoesNotRequireAuthorization()
         {
             // Arrange
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
             
             // Act
-            var result = await this._sut.Handle(request.Object, cancellationToken, Handler);
+            var result = await this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Assert
             result.ShouldBe(handlerResponse);
@@ -50,17 +50,17 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         public async Task Handle_ThrowsUnauthorizedAccessException_WhenCurrentUserIdIsNull()
         {
             // Arrange
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
 
-            TypeDescriptor.AddAttributes(request.Object, new AuthorizeAttribute());
+            TypeDescriptor.AddAttributes(requestMock.Object, new AuthorizeAttribute());
 
             this._currentUserServiceMock.Setup(cus => cus.GetUserId()).Returns(() => null);
             
             // Act
-            Task Execute() => this._sut.Handle(request.Object, cancellationToken, Handler);
+            Task Execute() => this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Assert
             await Execute().ShouldThrowAsync<UnauthorizedAccessException>();
@@ -71,7 +71,7 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         {
             // Arrange
             var userId = Guid.NewGuid().ToString();
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
@@ -89,14 +89,14 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
             {
                 Roles = roleC
             };
-            TypeDescriptor.AddAttributes(request.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
+            TypeDescriptor.AddAttributes(requestMock.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
 
             this._currentUserServiceMock.Setup(cus => cus.GetUserId()).Returns(userId);
             this._identityServiceMock.Setup(i => i.IsInRole(userId, It.Is<String>(s => s != validRole))).ReturnsAsync(false);
             this._identityServiceMock.Setup(i => i.IsInRole(userId, validRole)).ReturnsAsync(true);
             
             // Act
-            var result = await this._sut.Handle(request.Object, cancellationToken, Handler);
+            var result = await this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Assert
             result.ShouldBe(handlerResponse);
@@ -110,7 +110,7 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         {
             // Arrange
             var userId = Guid.NewGuid().ToString();
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
@@ -128,14 +128,14 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
             {
                 Roles = roleC
             };
-            TypeDescriptor.AddAttributes(request.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
+            TypeDescriptor.AddAttributes(requestMock.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
 
             this._currentUserServiceMock.Setup(cus => cus.GetUserId()).Returns(userId);
             this._identityServiceMock.Setup(i => i.IsInRole(userId, It.Is<String>(s => s != validRole))).ReturnsAsync(false);
             this._identityServiceMock.Setup(i => i.IsInRole(userId, validRole)).ReturnsAsync(true);
             
             // Act
-            await this._sut.Handle(request.Object, cancellationToken, Handler);
+            await this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Assert
             this._identityServiceMock.Verify(i => i.IsInRole(userId, roleA), Times.Once);
@@ -148,7 +148,7 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         {
             // Arrange
             var userId = Guid.NewGuid().ToString();
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
@@ -166,14 +166,14 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
             {
                 Roles = roleC
             };
-            TypeDescriptor.AddAttributes(request.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
+            TypeDescriptor.AddAttributes(requestMock.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
 
             this._currentUserServiceMock.Setup(cus => cus.GetUserId()).Returns(userId);
             this._identityServiceMock.Setup(i => i.IsInRole(userId, It.Is<String>(s => s != validRole))).ReturnsAsync(false);
             this._identityServiceMock.Setup(i => i.IsInRole(userId, validRole)).ReturnsAsync(true);
             
             // Act
-            Task Execute() => this._sut.Handle(request.Object, cancellationToken, Handler);
+            Task Execute() => this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Assert
             await Execute().ShouldThrowAsync<ForbiddenAccessException>();
@@ -187,7 +187,7 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         {
             // Arrange
             var userId = Guid.NewGuid().ToString();
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
@@ -203,14 +203,14 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
             {
                 Policy = policyB
             };
-            TypeDescriptor.AddAttributes(request.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
+            TypeDescriptor.AddAttributes(requestMock.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
 
             this._currentUserServiceMock.Setup(cus => cus.GetUserId()).Returns(userId);
             this._identityServiceMock.Setup(i => i.Authorize(userId, policyA)).ReturnsAsync(true);
             this._identityServiceMock.Setup(i => i.Authorize(userId, policyB)).ReturnsAsync(true);
             
             // Act
-            var result = await this._sut.Handle(request.Object, cancellationToken, Handler);
+            var result = await this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Assert
             result.ShouldBe(handlerResponse);
@@ -223,7 +223,7 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         {
             // Arrange
             var userId = Guid.NewGuid().ToString();
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
@@ -239,14 +239,14 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
             {
                 Policy = policyB
             };
-            TypeDescriptor.AddAttributes(request.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
+            TypeDescriptor.AddAttributes(requestMock.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
 
             this._currentUserServiceMock.Setup(cus => cus.GetUserId()).Returns(userId);
             this._identityServiceMock.Setup(i => i.Authorize(userId, policyA)).ReturnsAsync(true);
             this._identityServiceMock.Setup(i => i.Authorize(userId, policyB)).ReturnsAsync(false);
             
             // Act
-            Task Execute() => this._sut.Handle(request.Object, cancellationToken, Handler);
+            Task Execute() => this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Assert
             await Execute().ShouldThrowAsync<ForbiddenAccessException>();
@@ -259,7 +259,7 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         {
             // Arrange
             var userId = Guid.NewGuid().ToString();
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
@@ -275,14 +275,14 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
             {
                 Policy = policyB
             };
-            TypeDescriptor.AddAttributes(request.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
+            TypeDescriptor.AddAttributes(requestMock.Object, firstAuthorizeAttribute, secondAuthorizeAttribute);
 
             this._currentUserServiceMock.Setup(cus => cus.GetUserId()).Returns(userId);
             this._identityServiceMock.Setup(i => i.Authorize(userId, policyA)).ReturnsAsync(false);
             this._identityServiceMock.Setup(i => i.Authorize(userId, policyB)).ReturnsAsync(true);
             
             // Act
-            Task Execute() => this._sut.Handle(request.Object, cancellationToken, Handler);
+            Task Execute() => this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Assert
             await Execute().ShouldThrowAsync<ForbiddenAccessException>();

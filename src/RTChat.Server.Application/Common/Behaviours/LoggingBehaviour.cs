@@ -31,7 +31,7 @@ namespace RTChat.Server.Application.Common.Behaviours
 
             if (!String.IsNullOrEmpty(userId))
             {
-                userName = await _identityService.GetUserName(userId);
+                userName = await _identityService.GetUsername(userId);
             }
 
             _logger.LogInformation(LoggingBehaviourMessages.LoggingBehaviourInformationMessage,

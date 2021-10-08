@@ -31,7 +31,7 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         public async Task Handle_ReturnsRequestHandlerResult_WhenThereAreNoValidators()
         {
             // Arrange
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
@@ -39,7 +39,7 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
             this._validatorsMock.Setup(v => v.Count).Returns(0);
 
             // Act
-            var result = await this._sut.Handle(request.Object, cancellationToken, Handler);
+            var result = await this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Arrange
             result.ShouldBe(handlerResponse);
@@ -49,7 +49,7 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         public async Task Handle_CallsValidateAsyncOnEachValidatorAndReturnsRequestHandlerResult_WhenValidationsAreSuccessful()
         {
             // Arrange
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
@@ -59,11 +59,11 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
 
             validatorA.Setup(v =>
                 v.ValidateAsync(
-                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == request.Object),
+                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == requestMock.Object),
                     cancellationToken)).ReturnsAsync(new ValidationResult());
             validatorB.Setup(v =>
                 v.ValidateAsync(
-                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == request.Object),
+                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == requestMock.Object),
                     cancellationToken)).ReturnsAsync(new ValidationResult());
 
             var validators = new List<IValidator<IRequest<String>>>
@@ -76,16 +76,16 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
             this._validatorsMock.Setup(v => v.GetEnumerator()).Returns(validators.GetEnumerator());
 
             // Act
-            var result = await this._sut.Handle(request.Object, cancellationToken, Handler);
+            var result = await this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Arrange
             validatorA.Verify(
                 v => v.ValidateAsync(
-                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == request.Object),
+                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == requestMock.Object),
                     cancellationToken), Times.Once);
             validatorB.Verify(
                 v => v.ValidateAsync(
-                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == request.Object),
+                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == requestMock.Object),
                     cancellationToken), Times.Once);
             result.ShouldBe(handlerResponse);
         }
@@ -94,7 +94,7 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         public async Task Handle_CallsValidateAsyncOnEachValidatorAndThrowsValidationException_WhenValidationsContainFailures()
         {
             // Arrange
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
@@ -109,11 +109,11 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
 
             validatorA.Setup(v =>
                 v.ValidateAsync(
-                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == request.Object),
+                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == requestMock.Object),
                     cancellationToken)).ReturnsAsync(new ValidationResult());
             validatorB.Setup(v =>
                 v.ValidateAsync(
-                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == request.Object),
+                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == requestMock.Object),
                     cancellationToken)).ReturnsAsync(new ValidationResult(validationFailures));
 
             var validators = new List<IValidator<IRequest<String>>>
@@ -126,17 +126,17 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
             this._validatorsMock.Setup(v => v.GetEnumerator()).Returns(validators.GetEnumerator());
 
             // Act
-            Task Execute() => this._sut.Handle(request.Object, cancellationToken, Handler);
+            Task Execute() => this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Arrange
             await Execute().ShouldThrowAsync<ValidationException>();
             validatorA.Verify(
                 v => v.ValidateAsync(
-                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == request.Object),
+                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == requestMock.Object),
                     cancellationToken), Times.Once);
             validatorB.Verify(
                 v => v.ValidateAsync(
-                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == request.Object),
+                    It.Is<ValidationContext<IRequest<String>>>(vc => vc.InstanceToValidate == requestMock.Object),
                     cancellationToken), Times.Once);
         }
     }

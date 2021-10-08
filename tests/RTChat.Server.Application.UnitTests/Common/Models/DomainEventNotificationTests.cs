@@ -16,13 +16,13 @@ namespace RTChat.Server.Application.UnitTests.Common.Models
         {
             // Arrange
             var now = DateTimeOffset.UtcNow;
-            var domainEvent = new Mock<DomainEvent>(now);
+            var domainEventMock = new Mock<DomainEvent>(now);
             
             // Act
-            var sut = new DomainEventNotification<DomainEvent>(domainEvent.Object);
+            var sut = new DomainEventNotification<DomainEvent>(domainEventMock.Object);
             
             // Assert
-            sut.DomainEvent.ShouldBe(domainEvent.Object);
+            sut.DomainEvent.ShouldBe(domainEventMock.Object);
         }
     }
 }

@@ -21,6 +21,7 @@ namespace RTChat.Server.API.Services
         private readonly IApplicationCache _applicationCache;
         private readonly HttpClient _httpClient;
         private readonly IConfiguration _configuration;
+        
 
         public UserService(IApplicationCache applicationCache, IHttpClientFactory httpClientFactory, IConfiguration configuration)
         {

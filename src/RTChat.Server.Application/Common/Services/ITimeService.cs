@@ -4,6 +4,6 @@ namespace RTChat.Server.Application.Common.Services
 {
     public interface ITimeService
     {
-        DateTimeOffset Now();
+        DateTimeOffset UtcNow();
     }
 }

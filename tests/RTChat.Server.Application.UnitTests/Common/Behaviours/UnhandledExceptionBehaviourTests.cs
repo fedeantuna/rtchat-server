@@ -31,13 +31,13 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         public async Task Handle_ReturnsRequestHandlerResult()
         {
             // Arrange
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var cancellationToken = default(CancellationToken);
             const String handlerResponse = "test-handler-response";
             Task<String> Handler() => Task.FromResult(handlerResponse);
             
             // Act
-            var result = await this._sut.Handle(request.Object, cancellationToken, Handler);
+            var result = await this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Assert
             result.ShouldBe(handlerResponse);
@@ -47,14 +47,14 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
         public async Task Handle_LogsErrorAndThrowsException_WhenRequestHandlerIsNotValid()
         {
             // Arrange
-            var request = new Mock<IRequest<String>>();
+            var requestMock = new Mock<IRequest<String>>();
             var requestName = typeof(IRequest<String>).Name;
             var cancellationToken = default(CancellationToken);
             var exception = new Exception("test-exception");
             Task<String> Handler() => Task.FromException<String>(exception);
             
             // Act
-            Task<String> Execute() => this._sut.Handle(request.Object, cancellationToken, Handler);
+            Task<String> Execute() => this._sut.Handle(requestMock.Object, cancellationToken, Handler);
             
             // Assert
             await Execute().ShouldThrowAsync<Exception>(exception.Message);
@@ -63,7 +63,7 @@ namespace RTChat.Server.Application.UnitTests.Common.Behaviours
                     It.IsAny<EventId>(),
                     It.Is<It.IsAnyType>((state, t) => LoggerHelper.CheckValue(state, UnhandledExceptionBehaviourMessages.UnhandledExceptionErrorMessage, "{OriginalFormat}") 
                                                       && LoggerHelper.CheckValue(state, requestName, UnhandledExceptionBehaviourMessages.UnhandledExceptionErrorMessageNameParameter) 
-                                                      && LoggerHelper.CheckValue(state, request.Object, UnhandledExceptionBehaviourMessages.UnhandledExceptionErrorMessageRequestParameter)),
+                                                      && LoggerHelper.CheckValue(state, requestMock.Object, UnhandledExceptionBehaviourMessages.UnhandledExceptionErrorMessageRequestParameter)),
                     It.IsAny<Exception>(),
                     (Func<It.IsAnyType, Exception, String>)It.IsAny<Object>()),
                 Times.Once);

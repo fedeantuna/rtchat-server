@@ -5,7 +5,7 @@ namespace RTChat.Server.Application.Common.Services
 {
     public interface IIdentityService
     {
-        Task<String> GetUserName(String userId);
+        Task<String> GetUsername(String userId);
 
         Task<Boolean> IsInRole(String userId, String role);
 
